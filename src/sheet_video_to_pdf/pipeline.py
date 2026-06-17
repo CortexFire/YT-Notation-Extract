@@ -230,3 +230,7 @@ def _bgr_to_pil(frame: np.ndarray) -> Image.Image:
 
 def _gray_to_pil(image: np.ndarray) -> Image.Image:
     return Image.fromarray(image.astype(np.uint8), mode="L").convert("RGB")
+
+
+def _should_write_review_assets(config: AppConfig) -> bool:
+    return config.generate_review_assets and config.output_debug_files
