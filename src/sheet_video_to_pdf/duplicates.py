@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 import numpy as np
 
-from sheet_video_to_pdf.models import DuplicateFlags, ExtractedRegion
+from sheet_video_to_pdf.models import DuplicateFlags, DuplicatePolicy, ExtractedRegion
 
 ImageLoader = Callable[[Path], np.ndarray]
 
@@ -26,6 +26,7 @@ class _PreparedRegion:
 def flag_duplicate_regions(
     regions: Sequence[ExtractedRegion],
     *,
+    images_by_region_id: Mapping[str, np.ndarray] | None = None,
     image_loader: ImageLoader | None = None,
     exact_threshold: float = 0.995,
     near_threshold: float = 0.90,
@@ -39,7 +40,7 @@ def flag_duplicate_regions(
     prior: list[_PreparedRegion] = []
 
     for region in regions:
-        prepared = _prepare_region(region, image_loader)
+        prepared = _prepare_region(region, images_by_region_id, image_loader)
         if prepared is None:
             flags.append(DuplicateFlags())
             continue
@@ -73,6 +74,26 @@ def flag_duplicate_regions(
         prior.append(prepared)
 
     return flags
+
+
+def apply_duplicate_policy(
+    regions: Sequence[ExtractedRegion],
+    policy: DuplicatePolicy,
+) -> list[ExtractedRegion]:
+    if policy in {DuplicatePolicy.FLAG, DuplicatePolicy.FLAG_AND_INCLUDE}:
+        return list(regions)
+
+    if policy is DuplicatePolicy.FLAG_AND_SUPPRESS_OVERLAP:
+        return [
+            region
+            for region in regions
+            if not (
+                (region.duplicate_flags.exact_duplicate or region.duplicate_flags.near_duplicate)
+                and not region.duplicate_flags.repeat_candidate
+            )
+        ]
+
+    return list(regions)
 
 
 def _best_prior_match(
@@ -125,12 +146,16 @@ def _has_content_mismatch(first: _PreparedRegion, second: _PreparedRegion) -> bo
 
 def _prepare_region(
     region: ExtractedRegion,
+    images_by_region_id: Mapping[str, np.ndarray] | None,
     image_loader: ImageLoader,
 ) -> _PreparedRegion | None:
-    if region.image_path is None:
+    if images_by_region_id is not None and region.id in images_by_region_id:
+        image = images_by_region_id[region.id]
+    elif region.image_path is not None:
+        image = image_loader(region.image_path)
+    else:
         return None
 
-    image = image_loader(region.image_path)
     grayscale = _to_grayscale(image)
     content = _crop_content(grayscale)
     density = float(np.mean(grayscale < _FOREGROUND_THRESHOLD))
@@ -217,4 +242,4 @@ def _load_image(path: Path) -> np.ndarray:
         return np.asarray(image.convert("L"))
 
 
-__all__ = ["flag_duplicate_regions"]
+__all__ = ["apply_duplicate_policy", "flag_duplicate_regions"]

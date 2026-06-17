@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
-from sheet_video_to_pdf.duplicates import flag_duplicate_regions
-from sheet_video_to_pdf.models import BoundingBox, ExtractedRegion, RegionKind
+from sheet_video_to_pdf.duplicates import apply_duplicate_policy, flag_duplicate_regions
+from sheet_video_to_pdf.models import BoundingBox, DuplicateFlags, DuplicatePolicy, ExtractedRegion, RegionKind
 
 
 def _region(region_id: str, image_path: str, timestamp: float) -> ExtractedRegion:
@@ -102,3 +103,58 @@ def test_comparison_normalizes_grayscale_and_size() -> None:
 
     assert flags[1].near_duplicate is True
     assert flags[1].matched_region_id == "region_001"
+
+
+def test_flags_duplicates_from_in_memory_images_without_region_paths() -> None:
+    first = _region("region_001", "unused_001.png", 1.0).__class__(
+        id="region_001",
+        stable_view_id="view_001",
+        source_timestamp_seconds=1.0,
+        image_path=None,
+        bounding_box=BoundingBox(0, 0, 120, 80),
+        confidence=0.95,
+        kind=RegionKind.PARTIAL_VIEW,
+    )
+    second = first.__class__(
+        id="region_002",
+        stable_view_id="view_002",
+        source_timestamp_seconds=2.0,
+        image_path=None,
+        bounding_box=BoundingBox(0, 0, 120, 80),
+        confidence=0.95,
+        kind=RegionKind.PARTIAL_VIEW,
+    )
+    image = _notation_image()
+
+    flags = flag_duplicate_regions(
+        [first, second],
+        images_by_region_id={"region_001": image, "region_002": image.copy()},
+    )
+
+    assert flags[1].exact_duplicate is True
+    assert flags[1].matched_region_id == "region_001"
+
+
+def test_duplicate_policy_only_suppresses_non_repeat_overlap_candidates() -> None:
+    original = _region("region_001", "region_001.png", 1.0)
+    duplicate = replace(
+        _region("region_002", "region_002.png", 1.4),
+        duplicate_flags=DuplicateFlags(
+            near_duplicate=True,
+            matched_region_id="region_001",
+            repeat_candidate=False,
+        ),
+    )
+    repeat = replace(
+        _region("region_003", "region_003.png", 8.0),
+        duplicate_flags=DuplicateFlags(
+            near_duplicate=True,
+            matched_region_id="region_001",
+            repeat_candidate=True,
+        ),
+    )
+    regions = [original, duplicate, repeat]
+
+    assert apply_duplicate_policy(regions, DuplicatePolicy.FLAG) == regions
+    assert apply_duplicate_policy(regions, DuplicatePolicy.FLAG_AND_INCLUDE) == regions
+    assert apply_duplicate_policy(regions, DuplicatePolicy.FLAG_AND_SUPPRESS_OVERLAP) == [original, repeat]
