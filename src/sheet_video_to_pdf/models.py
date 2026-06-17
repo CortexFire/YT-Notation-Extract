@@ -81,6 +81,7 @@ class StableView:
     frame_index: int
     frame_path: Path | None
     stability_score: float
+    source_frame_index: int | None = None
     rejection_notes: list[str] = field(default_factory=list)
 
 

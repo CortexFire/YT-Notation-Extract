@@ -20,7 +20,9 @@ from sheet_video_to_pdf.models import (
     VideoMetadata,
 )
 from sheet_video_to_pdf.output import (
+    ArtifactWriter,
     generate_pdf_from_pages,
+    generate_pdf_from_page_images,
     prepare_output_dirs,
     write_region_image,
     write_stable_view_image,
@@ -88,6 +90,22 @@ def test_writes_sequential_jpegs_to_review_folders(tmp_path: Path) -> None:
     assert first_page.exists()
 
 
+def test_artifact_writer_writes_sequential_jpegs_without_rescanning(tmp_path: Path) -> None:
+    paths = prepare_output_dirs(AppConfig(output_dir=tmp_path / "out", output_pdf=tmp_path / "out" / "sheet_music.pdf"))
+    writer = ArtifactWriter(paths, jpeg_quality=80)
+    image = Image.new("RGB", (12, 8), "white")
+
+    first_view = writer.write_stable_view_image(image)
+    second_view = writer.write_stable_view_image(image)
+    first_region = writer.write_region_image(image)
+    first_page = writer.write_stitched_page_image(image)
+
+    assert first_view == paths.stable_views_dir / "view_001.jpg"
+    assert second_view == paths.stable_views_dir / "view_002.jpg"
+    assert first_region == paths.extracted_regions_dir / "region_001.jpg"
+    assert first_page == paths.stitched_pages_dir / "page_001.jpg"
+
+
 def test_write_manifest_serializes_run_manifest_json(tmp_path: Path) -> None:
     manifest = RunManifest(
         video=VideoMetadata(
@@ -153,6 +171,20 @@ def test_generate_pdf_from_stitched_pages_uses_page_images_in_order(tmp_path: Pa
     pdf_path = generate_pdf_from_pages(paths, tmp_path / "out" / "sheet_music.pdf", pdf_dpi=200)
 
     assert pdf_path == tmp_path / "out" / "sheet_music.pdf"
+    pdf_bytes = pdf_path.read_bytes()
+    assert pdf_bytes.startswith(b"%PDF")
+    assert pdf_bytes.count(b"/Type /Page") >= 2
+
+
+def test_generate_pdf_from_page_images_preserves_provided_order(tmp_path: Path) -> None:
+    first = tmp_path / "first.jpg"
+    second = tmp_path / "second.jpg"
+    Image.new("RGB", (20, 30), "white").save(first, format="JPEG")
+    Image.new("RGB", (20, 30), "black").save(second, format="JPEG")
+
+    pdf_path = generate_pdf_from_page_images([second, first], tmp_path / "ordered.pdf", pdf_dpi=200)
+
+    assert pdf_path == tmp_path / "ordered.pdf"
     pdf_bytes = pdf_path.read_bytes()
     assert pdf_bytes.startswith(b"%PDF")
     assert pdf_bytes.count(b"/Type /Page") >= 2

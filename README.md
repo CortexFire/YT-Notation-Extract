@@ -34,7 +34,7 @@ On Windows, if `python` is not available but the Python launcher is installed, u
 py main.py --input input/video.mp4 --output output/sheet_music.pdf
 ```
 
-The command-line app prints elapsed time while it works and a final completion time when it finishes.
+The command-line app prints a live elapsed-time tracker while it works.
 
 Optional output controls:
 
@@ -52,7 +52,7 @@ python main.py \
 Useful output flags:
 
 - `--output-dir` sets where debug files are written when debug output is enabled.
-- `--no-debug-files` writes only the final PDF. Intermediate page images are created in a temporary folder so the PDF can be generated, then removed.
+- `--no-debug-files` writes only the final PDF. Intermediate page images are still created temporarily so the PDF can be generated, then removed.
 - `--no-review-assets` keeps debug output enabled but skips stable-view and extracted-region review JPGs. Stitched page JPGs and `manifest.json` are still written.
 - `--no-clean-output` prevents the app from deleting prior generated output files before a run.
 

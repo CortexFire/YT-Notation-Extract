@@ -31,14 +31,26 @@ def determine_adaptive_cadence(
     fps: float,
     max_dimension: int = 160,
 ) -> CadenceAnalysis:
-    if fps <= 0:
-        raise ValueError("fps must be positive")
-    if not frames:
-        return CadenceAnalysis([], [], [])
-
     prepared = [
         prepare_for_comparison(frame, max_dimension=max_dimension).astype(np.float32) / 255.0
         for frame in frames
+    ]
+    return determine_adaptive_cadence_from_prepared(prepared, fps=fps)
+
+
+def determine_adaptive_cadence_from_prepared(
+    prepared_frames: Sequence[np.ndarray],
+    *,
+    fps: float,
+) -> CadenceAnalysis:
+    if fps <= 0:
+        raise ValueError("fps must be positive")
+    if not prepared_frames:
+        return CadenceAnalysis([], [], [])
+
+    prepared = [
+        frame.astype(np.float32) / 255.0 if frame.dtype != np.float32 or frame.max(initial=0) > 1.0 else frame
+        for frame in prepared_frames
     ]
     changes = [0.0]
     changes.extend(_change_score(prepared[index - 1], prepared[index]) for index in range(1, len(prepared)))
@@ -129,4 +141,9 @@ def _decision(index: int, fps: float, reason: str, change: float) -> CadenceDeci
     )
 
 
-__all__ = ["CadenceAnalysis", "CandidateFrame", "determine_adaptive_cadence"]
+__all__ = [
+    "CadenceAnalysis",
+    "CandidateFrame",
+    "determine_adaptive_cadence",
+    "determine_adaptive_cadence_from_prepared",
+]

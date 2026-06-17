@@ -10,65 +10,84 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from .cadence import determine_adaptive_cadence
-from .duplicates import flag_duplicate_regions
+from .cadence import determine_adaptive_cadence_from_prepared
+from .duplicates import apply_duplicate_policy, flag_duplicate_regions
 from .errors import NoNotationError, VideoReadError
 from .manifest import write_manifest
 from .models import AppConfig, ExtractedRegion, RunManifest, StableView, StitchedPage
+from .sampling import analyze_sampled_frames, read_sampled_frames_by_index
 from .output import (
+    ArtifactWriter,
     OutputPaths,
-    generate_pdf_from_pages,
+    generate_pdf_from_page_images,
     prepare_output_dirs,
-    write_region_image,
-    write_stable_view_image,
-    write_stitched_page_image,
 )
 from .pagination import paginate_strips
 from .regions import detect_notation_region
-from .stable_views import select_stable_views
+from .stable_views import select_stable_views_from_frame_map
 from .stitching import stitch_regions
 from .video import validate_mp4
 
 
 def run_pipeline(config: AppConfig) -> Path:
     metadata = validate_mp4(config.input_video)
-    frames, analysis_fps = _read_sampled_frames(config.input_video, metadata.frame_rate)
-    configured_output_paths = prepare_output_dirs(config)
+    output_paths = prepare_output_dirs(config)
 
-    with _active_output_paths(config, configured_output_paths) as output_paths:
-        cadence = determine_adaptive_cadence(frames, fps=analysis_fps)
-        stable_selection = select_stable_views(frames, cadence.candidates)
+    with _active_output_paths(config, output_paths) as active_output_paths:
+        writer = ArtifactWriter(active_output_paths, config.jpeg_quality)
+
+        sample_analysis = analyze_sampled_frames(config.input_video, metadata.frame_rate)
+        cadence = determine_adaptive_cadence_from_prepared(
+            sample_analysis.prepared_frames,
+            fps=sample_analysis.sampled_fps,
+        )
+        candidate_sample_indexes = {candidate.frame_index for candidate in cadence.candidates}
+        frames_by_sample_index = read_sampled_frames_by_index(
+            config.input_video,
+            sample_analysis.refs,
+            candidate_sample_indexes,
+        )
+        source_frame_indexes = {
+            ref.sample_index: ref.source_frame_index
+            for ref in sample_analysis.refs
+        }
+        stable_selection = select_stable_views_from_frame_map(
+            frames_by_sample_index,
+            cadence.candidates,
+            source_frame_indexes=source_frame_indexes,
+        )
         stable_views = _write_stable_views(
             stable_selection.accepted,
-            frames,
-            output_paths,
+            frames_by_sample_index,
+            writer,
             config,
         )
         if not stable_views:
             raise NoNotationError("No stable sheet music views were detected")
 
-        regions, region_images = _extract_regions(stable_views, frames, output_paths, config)
+        regions, region_images = _extract_regions(stable_views, frames_by_sample_index, writer, config)
         if not regions:
             raise NoNotationError("No reconstructable notation regions were detected")
 
-        duplicate_flags = flag_duplicate_regions(regions)
+        duplicate_flags = flag_duplicate_regions(regions, images_by_region_id=region_images)
         regions = [
             replace(region, duplicate_flags=flags)
             for region, flags in zip(regions, duplicate_flags)
         ]
 
-        stitch_result = stitch_regions(regions, region_images)
+        stitching_regions = apply_duplicate_policy(regions, config.duplicate_policy)
+        stitch_result = stitch_regions(stitching_regions, region_images)
         pages = paginate_strips(stitch_result.strips, config)
         if not pages:
             raise NoNotationError("No stitched pages were produced")
 
         stitched_pages: list[StitchedPage] = []
+        page_image_paths: list[Path] = []
         for page in pages:
-            page_path = write_stitched_page_image(
+            page_path = writer.write_stitched_page_image(
                 _gray_to_pil(page.image),
-                output_paths,
-                config.jpeg_quality,
             )
+            page_image_paths.append(page_path)
             source_times = [
                 region.source_timestamp_seconds
                 for region in regions
@@ -85,22 +104,21 @@ def run_pipeline(config: AppConfig) -> Path:
                 )
             )
 
-        manifest = RunManifest(
-            video=metadata,
-            cadence_decisions=cadence.decisions,
-            stable_views=stable_views,
-            extracted_regions=regions,
-            stitched_pages=stitched_pages,
-            warnings=[
-                *(f"candidate {item.frame_index}: {', '.join(item.notes)}" for item in cadence.rejected_candidates),
-                *(f"stable candidate {item.frame_index}: {', '.join(item.notes)}" for item in stable_selection.rejected),
-                *stitch_result.warnings,
-            ],
-        )
         if config.output_debug_files:
+            manifest = RunManifest(
+                video=metadata,
+                cadence_decisions=cadence.decisions,
+                stable_views=stable_views,
+                extracted_regions=regions,
+                stitched_pages=stitched_pages,
+                warnings=[
+                    *(f"candidate {item.frame_index}: {', '.join(item.notes)}" for item in cadence.rejected_candidates),
+                    *(f"stable candidate {item.frame_index}: {', '.join(item.notes)}" for item in stable_selection.rejected),
+                    *stitch_result.warnings,
+                ],
+            )
             write_manifest(manifest, output_paths.output_dir)
-
-        return generate_pdf_from_pages(output_paths, config.output_pdf, config.pdf_dpi)
+        return generate_pdf_from_page_images(page_image_paths, config.output_pdf, config.pdf_dpi)
 
 
 @contextmanager
@@ -147,51 +165,30 @@ def _read_sampled_frames(
     *,
     target_fps: float = 2.0,
 ) -> tuple[list[np.ndarray], float]:
-    if source_fps <= 0:
-        raise VideoReadError("Video frame rate is unreadable; cannot sample frames")
-
-    frame_step = max(1, int(round(source_fps / target_fps)))
-    sampled_fps = source_fps / frame_step
-    capture = cv2.VideoCapture(str(path))
-    if not capture.isOpened():
-        raise VideoReadError(
-            f"OpenCV could not open the MP4: {path}. Verify codec and FFmpeg support."
-        )
-
-    frames: list[np.ndarray] = []
-    frame_index = 0
-    try:
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            if frame_index % frame_step == 0:
-                frames.append(frame)
-            frame_index += 1
-    finally:
-        capture.release()
-
-    if not frames:
-        raise VideoReadError(
-            f"OpenCV could not decode sampled frames from {path}. Verify codec and FFmpeg support."
-        )
-    return frames, sampled_fps
+    analysis = analyze_sampled_frames(path, source_fps, target_fps)
+    frames_by_sample_index = read_sampled_frames_by_index(
+        path,
+        analysis.refs,
+        (ref.sample_index for ref in analysis.refs),
+    )
+    return [
+        frames_by_sample_index[ref.sample_index]
+        for ref in analysis.refs
+    ], analysis.sampled_fps
 
 
 def _write_stable_views(
     stable_views: list[StableView],
-    frames: list[np.ndarray],
-    output_paths,
+    frames: dict[int, np.ndarray],
+    writer: ArtifactWriter,
     config: AppConfig,
 ) -> list[StableView]:
     written: list[StableView] = []
     for stable_view in stable_views:
         frame_path = None
-        if _should_write_review_assets(config):
-            frame_path = write_stable_view_image(
+        if config.output_debug_files and config.generate_review_assets:
+            frame_path = writer.write_stable_view_image(
                 _bgr_to_pil(frames[stable_view.frame_index]),
-                output_paths,
-                config.jpeg_quality,
             )
         written.append(replace(stable_view, frame_path=frame_path))
     return written
@@ -199,8 +196,8 @@ def _write_stable_views(
 
 def _extract_regions(
     stable_views: list[StableView],
-    frames: list[np.ndarray],
-    output_paths,
+    frames: dict[int, np.ndarray],
+    writer: ArtifactWriter,
     config: AppConfig,
 ) -> tuple[list[ExtractedRegion], dict[str, np.ndarray]]:
     regions: list[ExtractedRegion] = []
@@ -216,11 +213,9 @@ def _extract_regions(
         box = region.bounding_box
         crop = frame[box.y : box.y + box.height, box.x : box.x + box.width]
         region_path = None
-        if _should_write_review_assets(config):
-            region_path = write_region_image(
+        if config.output_debug_files and config.generate_review_assets:
+            region_path = writer.write_region_image(
                 _bgr_to_pil(crop),
-                output_paths,
-                config.jpeg_quality,
             )
         region = replace(region, image_path=region_path)
         regions.append(region)

@@ -6,7 +6,7 @@ from typing import Callable
 from .errors import SheetVideoToPdfError
 from .models import AppConfig
 from .pipeline import run_pipeline
-from .progress import ElapsedTimeTracker
+from .progress import run_with_elapsed_tracker
 
 
 InputFunc = Callable[[str], str]
@@ -19,13 +19,13 @@ def run_interactive(
     pipeline: PipelineFunc = run_pipeline,
     input_func: InputFunc = input,
     pause_func: PauseFunc | None = None,
-    progress_interval: float = 1.0,
+    elapsed_interval_seconds: float = 1.0,
 ) -> int:
     if pause_func is None:
         pause_func = _pause
 
     try:
-        return _run_prompt_flow(pipeline, input_func, progress_interval)
+        return _run_prompt_flow(pipeline, input_func, elapsed_interval_seconds)
     finally:
         pause_func()
 
@@ -33,7 +33,7 @@ def run_interactive(
 def _run_prompt_flow(
     pipeline: PipelineFunc,
     input_func: InputFunc,
-    progress_interval: float,
+    elapsed_interval_seconds: float,
 ) -> int:
     print("Sheet Video to PDF")
     print("==================")
@@ -82,8 +82,11 @@ def _run_prompt_flow(
     print()
     print("Working... this can take a little while for longer videos.")
     try:
-        with ElapsedTimeTracker(interval=progress_interval):
-            pdf_path = pipeline(config)
+        pdf_path = run_with_elapsed_tracker(
+            pipeline,
+            config,
+            interval_seconds=elapsed_interval_seconds,
+        )
     except SheetVideoToPdfError as exc:
         print()
         print(f"Could not create PDF: {exc}")
@@ -93,7 +96,7 @@ def _run_prompt_flow(
     print("Done!")
     print(f"PDF: {pdf_path}")
     if config.output_debug_files:
-        print(f"Review assets: {config.output_dir}")
+        print(f"Debug files: {config.output_dir}")
     return 0
 
 

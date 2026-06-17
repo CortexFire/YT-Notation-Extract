@@ -10,7 +10,7 @@ from .config import build_config
 from .errors import SheetVideoToPdfError
 from .models import AppConfig, DuplicatePolicy, PageOrientation, PagePreset
 from .pipeline import run_pipeline
-from .progress import ElapsedTimeTracker
+from .progress import run_with_elapsed_tracker
 
 
 @dataclass(frozen=True)
@@ -60,14 +60,17 @@ def parse_args(argv: Sequence[str] | None = None) -> ParsedCli:
 def run_cli(
     argv: Sequence[str] | None = None,
     pipeline: Callable[[AppConfig], Path] = run_pipeline,
-    *,
-    progress_interval: float = 1.0,
+    elapsed_interval_seconds: float = 1.0,
 ) -> int:
     try:
         parsed = parse_args(argv)
         config = build_config(parsed.config_path, parsed.overrides)
-        with ElapsedTimeTracker(interval=progress_interval):
-            pipeline(config)
+        print("Working... this can take a little while for longer videos.")
+        run_with_elapsed_tracker(
+            pipeline,
+            config,
+            interval_seconds=elapsed_interval_seconds,
+        )
     except SheetVideoToPdfError as exc:
         print(str(exc), file=sys.stderr)
         return 2

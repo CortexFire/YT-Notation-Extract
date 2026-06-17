@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
 
@@ -29,18 +29,32 @@ def select_stable_views(
     *,
     min_content_score: float = 0.015,
 ) -> StableViewSelection:
+    return select_stable_views_from_frame_map(
+        {index: frame for index, frame in enumerate(frames)},
+        candidates,
+        min_content_score=min_content_score,
+    )
+
+
+def select_stable_views_from_frame_map(
+    frames_by_sample_index: Mapping[int, np.ndarray],
+    candidates: Sequence[CandidateFrame],
+    *,
+    source_frame_indexes: Mapping[int, int] | None = None,
+    min_content_score: float = 0.015,
+) -> StableViewSelection:
     accepted: list[StableView] = []
     rejected: list[RejectedStableCandidate] = []
     last_signature: np.ndarray | None = None
 
     for candidate in candidates:
         notes = list(candidate.notes)
-        if candidate.frame_index >= len(frames):
+        if candidate.frame_index not in frames_by_sample_index:
             notes.append("frame-index-out-of-range")
             rejected.append(RejectedStableCandidate(candidate.frame_index, candidate.timestamp_seconds, notes))
             continue
 
-        frame = frames[candidate.frame_index]
+        frame = frames_by_sample_index[candidate.frame_index]
         content_score = _content_score(frame)
         if "static-hold" in notes:
             notes.append("static-hold-collapsed")
@@ -77,6 +91,11 @@ def select_stable_views(
                 frame_index=candidate.frame_index,
                 frame_path=None,
                 stability_score=round(candidate.stability_score, 3),
+                source_frame_index=(
+                    source_frame_indexes.get(candidate.frame_index)
+                    if source_frame_indexes is not None
+                    else None
+                ),
                 rejection_notes=[],
             )
         )
@@ -119,4 +138,9 @@ def _blur_threshold(frame: np.ndarray) -> float:
     return 0.155
 
 
-__all__ = ["RejectedStableCandidate", "StableViewSelection", "select_stable_views"]
+__all__ = [
+    "RejectedStableCandidate",
+    "StableViewSelection",
+    "select_stable_views",
+    "select_stable_views_from_frame_map",
+]
