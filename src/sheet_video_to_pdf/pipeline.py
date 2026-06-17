@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
+import tempfile
+from typing import Iterator
 
 import cv2
 import numpy as np
@@ -13,6 +16,7 @@ from .errors import NoNotationError, VideoReadError
 from .manifest import write_manifest
 from .models import AppConfig, ExtractedRegion, RunManifest, StableView, StitchedPage
 from .output import (
+    OutputPaths,
     generate_pdf_from_pages,
     prepare_output_dirs,
     write_region_image,
@@ -29,71 +33,90 @@ from .video import validate_mp4
 def run_pipeline(config: AppConfig) -> Path:
     metadata = validate_mp4(config.input_video)
     frames, analysis_fps = _read_sampled_frames(config.input_video, metadata.frame_rate)
-    output_paths = prepare_output_dirs(config)
+    configured_output_paths = prepare_output_dirs(config)
 
-    cadence = determine_adaptive_cadence(frames, fps=analysis_fps)
-    stable_selection = select_stable_views(frames, cadence.candidates)
-    stable_views = _write_stable_views(
-        stable_selection.accepted,
-        frames,
-        output_paths,
-        config,
-    )
-    if not stable_views:
-        raise NoNotationError("No stable sheet music views were detected")
-
-    regions, region_images = _extract_regions(stable_views, frames, output_paths, config)
-    if not regions:
-        raise NoNotationError("No reconstructable notation regions were detected")
-
-    duplicate_flags = flag_duplicate_regions(regions)
-    regions = [
-        replace(region, duplicate_flags=flags)
-        for region, flags in zip(regions, duplicate_flags)
-    ]
-
-    stitch_result = stitch_regions(regions, region_images)
-    pages = paginate_strips(stitch_result.strips, config)
-    if not pages:
-        raise NoNotationError("No stitched pages were produced")
-
-    stitched_pages: list[StitchedPage] = []
-    for page in pages:
-        page_path = write_stitched_page_image(
-            _gray_to_pil(page.image),
+    with _active_output_paths(config, configured_output_paths) as output_paths:
+        cadence = determine_adaptive_cadence(frames, fps=analysis_fps)
+        stable_selection = select_stable_views(frames, cadence.candidates)
+        stable_views = _write_stable_views(
+            stable_selection.accepted,
+            frames,
             output_paths,
-            config.jpeg_quality,
+            config,
         )
-        source_times = [
-            region.source_timestamp_seconds
-            for region in regions
-            if region.id in page.included_region_ids
-        ]
-        stitched_pages.append(
-            StitchedPage(
-                id=page.id,
-                image_path=page_path,
-                included_region_ids=page.included_region_ids,
-                source_start_seconds=min(source_times) if source_times else 0.0,
-                source_end_seconds=max(source_times) if source_times else 0.0,
-                warnings=page.warnings,
-            )
-        )
+        if not stable_views:
+            raise NoNotationError("No stable sheet music views were detected")
 
-    manifest = RunManifest(
-        video=metadata,
-        cadence_decisions=cadence.decisions,
-        stable_views=stable_views,
-        extracted_regions=regions,
-        stitched_pages=stitched_pages,
-        warnings=[
-            *(f"candidate {item.frame_index}: {', '.join(item.notes)}" for item in cadence.rejected_candidates),
-            *(f"stable candidate {item.frame_index}: {', '.join(item.notes)}" for item in stable_selection.rejected),
-            *stitch_result.warnings,
-        ],
-    )
-    write_manifest(manifest, output_paths.output_dir)
-    return generate_pdf_from_pages(output_paths, config.output_pdf, config.pdf_dpi)
+        regions, region_images = _extract_regions(stable_views, frames, output_paths, config)
+        if not regions:
+            raise NoNotationError("No reconstructable notation regions were detected")
+
+        duplicate_flags = flag_duplicate_regions(regions)
+        regions = [
+            replace(region, duplicate_flags=flags)
+            for region, flags in zip(regions, duplicate_flags)
+        ]
+
+        stitch_result = stitch_regions(regions, region_images)
+        pages = paginate_strips(stitch_result.strips, config)
+        if not pages:
+            raise NoNotationError("No stitched pages were produced")
+
+        stitched_pages: list[StitchedPage] = []
+        for page in pages:
+            page_path = write_stitched_page_image(
+                _gray_to_pil(page.image),
+                output_paths,
+                config.jpeg_quality,
+            )
+            source_times = [
+                region.source_timestamp_seconds
+                for region in regions
+                if region.id in page.included_region_ids
+            ]
+            stitched_pages.append(
+                StitchedPage(
+                    id=page.id,
+                    image_path=page_path,
+                    included_region_ids=page.included_region_ids,
+                    source_start_seconds=min(source_times) if source_times else 0.0,
+                    source_end_seconds=max(source_times) if source_times else 0.0,
+                    warnings=page.warnings,
+                )
+            )
+
+        manifest = RunManifest(
+            video=metadata,
+            cadence_decisions=cadence.decisions,
+            stable_views=stable_views,
+            extracted_regions=regions,
+            stitched_pages=stitched_pages,
+            warnings=[
+                *(f"candidate {item.frame_index}: {', '.join(item.notes)}" for item in cadence.rejected_candidates),
+                *(f"stable candidate {item.frame_index}: {', '.join(item.notes)}" for item in stable_selection.rejected),
+                *stitch_result.warnings,
+            ],
+        )
+        if config.output_debug_files:
+            write_manifest(manifest, output_paths.output_dir)
+
+        return generate_pdf_from_pages(output_paths, config.output_pdf, config.pdf_dpi)
+
+
+@contextmanager
+def _active_output_paths(config: AppConfig, output_paths: OutputPaths) -> Iterator[OutputPaths]:
+    if config.output_debug_files:
+        yield output_paths
+        return
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        yield OutputPaths(
+            output_dir=root,
+            stable_views_dir=root / "stable_views",
+            extracted_regions_dir=root / "extracted_regions",
+            stitched_pages_dir=root / "stitched_pages",
+        )
 
 
 def _read_all_frames(path: str | Path) -> list[np.ndarray]:
@@ -164,7 +187,7 @@ def _write_stable_views(
     written: list[StableView] = []
     for stable_view in stable_views:
         frame_path = None
-        if config.generate_review_assets:
+        if _should_write_review_assets(config):
             frame_path = write_stable_view_image(
                 _bgr_to_pil(frames[stable_view.frame_index]),
                 output_paths,
@@ -193,7 +216,7 @@ def _extract_regions(
         box = region.bounding_box
         crop = frame[box.y : box.y + box.height, box.x : box.x + box.width]
         region_path = None
-        if config.generate_review_assets:
+        if _should_write_review_assets(config):
             region_path = write_region_image(
                 _bgr_to_pil(crop),
                 output_paths,
@@ -212,3 +235,7 @@ def _bgr_to_pil(frame: np.ndarray) -> Image.Image:
 
 def _gray_to_pil(image: np.ndarray) -> Image.Image:
     return Image.fromarray(image.astype(np.uint8), mode="L").convert("RGB")
+
+
+def _should_write_review_assets(config: AppConfig) -> bool:
+    return config.generate_review_assets and config.output_debug_files

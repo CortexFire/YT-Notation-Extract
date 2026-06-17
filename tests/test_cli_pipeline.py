@@ -1,6 +1,7 @@
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 from sheet_video_to_pdf.cli import parse_args, run_cli
 from sheet_video_to_pdf.config import DEFAULT_CONFIG
@@ -31,6 +32,7 @@ def test_parse_args_maps_output_options_without_sample_fps():
             "flag-and-include",
             "--no-review-assets",
             "--no-clean-output",
+            "--no-debug-files",
         ]
     )
 
@@ -42,6 +44,7 @@ def test_parse_args_maps_output_options_without_sample_fps():
     assert parsed.overrides["duplicate_policy"] == "flag-and-include"
     assert parsed.overrides["generate_review_assets"] is False
     assert parsed.overrides["clean_output"] is False
+    assert parsed.overrides["output_debug_files"] is False
     assert "sample_fps" not in parsed.overrides
 
 
@@ -58,6 +61,22 @@ def test_run_cli_returns_zero_when_pipeline_succeeds(tmp_path):
 
     assert exit_code == 0
     assert seen["config"].duplicate_policy is DuplicatePolicy.FLAG
+
+
+def test_run_cli_reports_elapsed_time_while_pipeline_runs_and_when_complete(tmp_path, capsys):
+    config_file = tmp_path / "config.json"
+    config_file.write_text('{"input_video": "input/video.mp4"}', encoding="utf-8")
+
+    def fake_pipeline(_config):
+        time.sleep(0.03)
+        return Path("output/sheet_music.pdf")
+
+    exit_code = run_cli(["--config", str(config_file)], fake_pipeline, progress_interval=0.005)
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert output.count("Elapsed time:") >= 2
+    assert "Finished in" in output
 
 
 def test_run_cli_returns_nonzero_for_user_facing_errors(capsys):
@@ -106,6 +125,58 @@ def test_pipeline_processes_synthetic_video_end_to_end(tmp_path):
     assert list((config.output_dir / "stable_views").glob("view_*.jpg"))
     assert list((config.output_dir / "extracted_regions").glob("region_*.jpg"))
     assert list((config.output_dir / "stitched_pages").glob("page_*.jpg"))
+
+
+def test_pipeline_pdf_only_mode_leaves_only_final_pdf(tmp_path):
+    video_path = create_moving_sheet_music_video(
+        tmp_path / "input.mp4",
+        positions=(0, 12, 24),
+        hold_frames=2,
+        transition_frames=1,
+        fps=5.0,
+        frame_size=(160, 120),
+    )
+    output_dir = tmp_path / "out"
+    config = DEFAULT_CONFIG.__class__(
+        input_video=video_path,
+        output_dir=output_dir,
+        output_pdf=output_dir / "sheet_music.pdf",
+        pdf_dpi=80,
+        output_debug_files=False,
+    )
+
+    pdf_path = run_pipeline(config)
+
+    assert pdf_path == config.output_pdf
+    assert pdf_path.exists()
+    assert sorted(path.name for path in output_dir.iterdir()) == ["sheet_music.pdf"]
+
+
+def test_pipeline_pdf_only_mode_does_not_create_separate_debug_folder(tmp_path):
+    video_path = create_moving_sheet_music_video(
+        tmp_path / "input.mp4",
+        positions=(0, 12, 24),
+        hold_frames=2,
+        transition_frames=1,
+        fps=5.0,
+        frame_size=(160, 120),
+    )
+    debug_dir = tmp_path / "debug"
+    output_pdf = tmp_path / "pdfs" / "sheet_music.pdf"
+    config = DEFAULT_CONFIG.__class__(
+        input_video=video_path,
+        output_dir=debug_dir,
+        output_pdf=output_pdf,
+        pdf_dpi=80,
+        output_debug_files=False,
+    )
+
+    pdf_path = run_pipeline(config)
+
+    assert pdf_path == output_pdf
+    assert output_pdf.exists()
+    assert not debug_dir.exists()
+    assert sorted(path.name for path in output_pdf.parent.iterdir()) == ["sheet_music.pdf"]
 
 
 def test_read_sampled_frames_reduces_high_frame_rate_video(tmp_path):

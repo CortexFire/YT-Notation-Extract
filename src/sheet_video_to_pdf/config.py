@@ -112,7 +112,7 @@ def _convert_value(key: str, value: Any) -> Any:
         if dpi < 1:
             raise ValueError("pdf_dpi must be positive")
         return dpi
-    if key in {"generate_review_assets", "clean_output"}:
+    if key in {"generate_review_assets", "output_debug_files", "clean_output"}:
         if not isinstance(value, bool):
             raise ValueError(f"{key} must be true or false")
         return value

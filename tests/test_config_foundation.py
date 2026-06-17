@@ -19,6 +19,7 @@ def test_default_config_matches_spec_defaults():
     assert config.target_systems_per_page == "auto"
     assert config.duplicate_policy is DuplicatePolicy.FLAG
     assert config.generate_review_assets is True
+    assert config.output_debug_files is True
     assert config.jpeg_quality == 92
     assert config.pdf_dpi == 200
     assert config.clean_output is True
@@ -38,6 +39,7 @@ def test_config_file_values_override_defaults_and_cli_values_override_file(tmp_p
           "target_systems_per_page": 5,
           "duplicate_policy": "flag-and-include",
           "generate_review_assets": false,
+          "output_debug_files": false,
           "jpeg_quality": 80,
           "pdf_dpi": 150,
           "clean_output": false
@@ -52,6 +54,7 @@ def test_config_file_values_override_defaults_and_cli_values_override_file(tmp_p
             "input_video": "cli-value.mp4",
             "duplicate_policy": "flag",
             "generate_review_assets": True,
+            "output_debug_files": True,
         },
     )
 
@@ -63,6 +66,7 @@ def test_config_file_values_override_defaults_and_cli_values_override_file(tmp_p
     assert config.target_systems_per_page == 5
     assert config.duplicate_policy is DuplicatePolicy.FLAG
     assert config.generate_review_assets is True
+    assert config.output_debug_files is True
     assert config.jpeg_quality == 80
     assert config.pdf_dpi == 150
     assert config.clean_output is False

@@ -35,9 +35,10 @@ def prepare_output_dirs(config: AppConfig) -> OutputPaths:
     if config.clean_output:
         clean_output(config)
 
-    paths.stable_views_dir.mkdir(parents=True, exist_ok=True)
-    paths.extracted_regions_dir.mkdir(parents=True, exist_ok=True)
-    paths.stitched_pages_dir.mkdir(parents=True, exist_ok=True)
+    if config.output_debug_files:
+        paths.stable_views_dir.mkdir(parents=True, exist_ok=True)
+        paths.extracted_regions_dir.mkdir(parents=True, exist_ok=True)
+        paths.stitched_pages_dir.mkdir(parents=True, exist_ok=True)
     return paths
 
 
