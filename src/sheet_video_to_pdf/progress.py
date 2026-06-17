@@ -54,15 +54,15 @@ class ElapsedTimeTracker:
             self._write_elapsed()
 
     def _write_elapsed(self) -> None:
-        self._write(f"Elapsed time: {self.elapsed_text()}")
+        self._write(f"Elapsed time: {self.elapsed_text()}", end="")
 
     def _write_finished(self) -> None:
-        self._write(f"Finished in {self.elapsed_text()}")
+        self._write(f"Finished in {self.elapsed_text()}", end="\n")
 
-    def _write(self, message: str) -> None:
+    def _write(self, message: str, *, end: str) -> None:
         stream = self.stream or sys.stdout
         with self._lock:
-            print(message, file=stream)
+            print(f"\r{message}", end=end, file=stream)
             stream.flush()
 
     def elapsed_text(self) -> str:
