@@ -23,6 +23,35 @@ class OutputPaths:
     stitched_pages_dir: Path
 
 
+class ArtifactWriter:
+    def __init__(self, paths: OutputPaths, jpeg_quality: int) -> None:
+        self.paths = paths
+        self.jpeg_quality = jpeg_quality
+        self._next_indexes = {
+            "view": _next_index(paths.stable_views_dir, "view"),
+            "region": _next_index(paths.extracted_regions_dir, "region"),
+            "page": _next_index(paths.stitched_pages_dir, "page"),
+        }
+
+    def write_stable_view_image(self, image: Image.Image) -> Path:
+        return self._write_numbered_jpeg(image, self.paths.stable_views_dir, "view")
+
+    def write_region_image(self, image: Image.Image) -> Path:
+        return self._write_numbered_jpeg(image, self.paths.extracted_regions_dir, "region")
+
+    def write_stitched_page_image(self, image: Image.Image) -> Path:
+        return self._write_numbered_jpeg(image, self.paths.stitched_pages_dir, "page")
+
+    def _write_numbered_jpeg(self, image: Image.Image, directory: Path, prefix: str) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        next_index = self._next_indexes[prefix]
+        self._next_indexes[prefix] = next_index + 1
+        path = directory / f"{prefix}_{next_index:03d}.jpg"
+        image_to_save = image.convert("RGB") if image.mode != "RGB" else image
+        image_to_save.save(path, format="JPEG", quality=self.jpeg_quality)
+        return path
+
+
 def prepare_output_dirs(config: AppConfig) -> OutputPaths:
     output_dir = Path(config.output_dir)
     paths = OutputPaths(
@@ -35,16 +64,19 @@ def prepare_output_dirs(config: AppConfig) -> OutputPaths:
     if config.clean_output:
         clean_output(config)
 
-    paths.stable_views_dir.mkdir(parents=True, exist_ok=True)
-    paths.extracted_regions_dir.mkdir(parents=True, exist_ok=True)
-    paths.stitched_pages_dir.mkdir(parents=True, exist_ok=True)
+    if config.output_debug_files:
+        paths.stable_views_dir.mkdir(parents=True, exist_ok=True)
+        paths.extracted_regions_dir.mkdir(parents=True, exist_ok=True)
+        paths.stitched_pages_dir.mkdir(parents=True, exist_ok=True)
     return paths
 
 
 def clean_output(config: AppConfig) -> None:
     output_dir = Path(config.output_dir)
     for dirname in (STABLE_VIEWS_DIRNAME, EXTRACTED_REGIONS_DIRNAME, STITCHED_PAGES_DIRNAME):
-        _unlink_files_inside(output_dir / dirname)
+        generated_dir = output_dir / dirname
+        _unlink_files_inside(generated_dir)
+        _rmdir_if_empty(generated_dir)
 
     _unlink_if_file(output_dir / "manifest.json")
 
@@ -67,6 +99,14 @@ def write_stitched_page_image(image: Image.Image, paths: OutputPaths, jpeg_quali
 
 def generate_pdf_from_pages(paths: OutputPaths, output_pdf: str | Path, pdf_dpi: int) -> Path:
     page_images = _numbered_jpegs(paths.stitched_pages_dir, "page")
+    return generate_pdf_from_page_images(page_images, output_pdf, pdf_dpi)
+
+
+def generate_pdf_from_page_images(
+    page_images: list[Path] | tuple[Path, ...],
+    output_pdf: str | Path,
+    pdf_dpi: int,
+) -> Path:
     if not page_images:
         raise NoNotationError("No stitched page images exist; cannot generate PDF")
 
@@ -129,6 +169,15 @@ def _unlink_files_inside(directory: Path) -> None:
 def _unlink_if_file(path: Path) -> None:
     if path.is_file() or path.is_symlink():
         path.unlink()
+
+
+def _rmdir_if_empty(path: Path) -> None:
+    try:
+        path.rmdir()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:

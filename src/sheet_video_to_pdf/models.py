@@ -38,6 +38,7 @@ class AppConfig:
     target_systems_per_page: int | str = "auto"
     duplicate_policy: DuplicatePolicy = DuplicatePolicy.FLAG
     generate_review_assets: bool = True
+    output_debug_files: bool = True
     jpeg_quality: int = 92
     pdf_dpi: int = 200
     clean_output: bool = True
@@ -80,6 +81,7 @@ class StableView:
     frame_index: int
     frame_path: Path | None
     stability_score: float
+    source_frame_index: int | None = None
     rejection_notes: list[str] = field(default_factory=list)
 
 

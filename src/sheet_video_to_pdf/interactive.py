@@ -6,6 +6,7 @@ from typing import Callable
 from .errors import SheetVideoToPdfError
 from .models import AppConfig
 from .pipeline import run_pipeline
+from .progress import run_with_elapsed_tracker
 
 
 InputFunc = Callable[[str], str]
@@ -18,17 +19,22 @@ def run_interactive(
     pipeline: PipelineFunc = run_pipeline,
     input_func: InputFunc = input,
     pause_func: PauseFunc | None = None,
+    elapsed_interval_seconds: float = 1.0,
 ) -> int:
     if pause_func is None:
         pause_func = _pause
 
     try:
-        return _run_prompt_flow(pipeline, input_func)
+        return _run_prompt_flow(pipeline, input_func, elapsed_interval_seconds)
     finally:
         pause_func()
 
 
-def _run_prompt_flow(pipeline: PipelineFunc, input_func: InputFunc) -> int:
+def _run_prompt_flow(
+    pipeline: PipelineFunc,
+    input_func: InputFunc,
+    elapsed_interval_seconds: float,
+) -> int:
     print("Sheet Video to PDF")
     print("==================")
     print("Convert an MP4 of sheet music into a reconstructed PDF.")
@@ -57,18 +63,30 @@ def _run_prompt_flow(pipeline: PipelineFunc, input_func: InputFunc) -> int:
         output_dir = default_output_dir
     else:
         output_pdf = _prompt_required_path(input_func, "Output PDF path: ")
+
+    output_debug_files = _prompt_yes_no(input_func, "Output debug files? [y/n]: ")
+    if use_video_folder:
+        output_dir = default_output_dir
+    elif output_debug_files:
         output_dir = _prompt_required_path(input_func, "Review assets folder: ")
+    else:
+        output_dir = output_pdf.parent
 
     config = AppConfig(
         input_video=input_video,
         output_pdf=output_pdf,
         output_dir=output_dir,
+        output_debug_files=output_debug_files,
     )
 
     print()
     print("Working... this can take a little while for longer videos.")
     try:
-        pdf_path = pipeline(config)
+        pdf_path = run_with_elapsed_tracker(
+            pipeline,
+            config,
+            interval_seconds=elapsed_interval_seconds,
+        )
     except SheetVideoToPdfError as exc:
         print()
         print(f"Could not create PDF: {exc}")
@@ -77,7 +95,8 @@ def _run_prompt_flow(pipeline: PipelineFunc, input_func: InputFunc) -> int:
     print()
     print("Done!")
     print(f"PDF: {pdf_path}")
-    print(f"Review assets: {config.output_dir}")
+    if config.output_debug_files:
+        print(f"Debug files: {config.output_dir}")
     return 0
 
 

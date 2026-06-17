@@ -4,9 +4,14 @@ import inspect
 
 import numpy as np
 
-from sheet_video_to_pdf.cadence import CandidateFrame, determine_adaptive_cadence
+from sheet_video_to_pdf.cadence import (
+    CandidateFrame,
+    determine_adaptive_cadence,
+    determine_adaptive_cadence_from_prepared,
+)
 from sheet_video_to_pdf.models import CadenceDecision, StableView
-from sheet_video_to_pdf.stable_views import select_stable_views
+from sheet_video_to_pdf.preprocess import prepare_for_comparison
+from sheet_video_to_pdf.stable_views import select_stable_views, select_stable_views_from_frame_map
 
 
 def _notation_frame(y_offset: int = 0, height: int = 96, width: int = 128) -> np.ndarray:
@@ -61,6 +66,18 @@ def test_adaptive_cadence_has_no_user_sample_fps_and_records_density_decisions()
     assert any("change-adjacent" in decision.reason for decision in analysis.decisions)
     assert any("motion-heavy" in decision.reason for decision in analysis.decisions)
     assert any("motion-heavy" in candidate.notes for candidate in analysis.rejected_candidates)
+
+
+def test_adaptive_cadence_from_prepared_matches_frame_preparation_path() -> None:
+    frames = [_notation_frame(0), _motion_frame(), _notation_frame(20)]
+    prepared = [prepare_for_comparison(frame, max_dimension=160) for frame in frames]
+
+    from_frames = determine_adaptive_cadence(frames, fps=2.0)
+    from_prepared = determine_adaptive_cadence_from_prepared(prepared, fps=2.0)
+
+    assert from_prepared.candidates == from_frames.candidates
+    assert from_prepared.rejected_candidates == from_frames.rejected_candidates
+    assert from_prepared.decisions == from_frames.decisions
 
 
 def test_adaptive_cadence_marks_low_content_fade_as_transition_range() -> None:
@@ -129,6 +146,31 @@ def test_select_stable_views_keeps_first_after_change_and_rejects_bad_candidates
     rejected_notes = {item.frame_index: item.notes for item in selection.rejected}
     assert "static-hold-collapsed" in rejected_notes[1]
     assert "motion-heavy" in rejected_notes[2]
+    assert "too-small-content" in rejected_notes[4]
+
+
+def test_select_stable_views_from_frame_map_keeps_source_frame_indexes() -> None:
+    frames = {
+        0: _notation_frame(0),
+        3: _notation_frame(20),
+        4: np.full((96, 128, 3), 245, dtype=np.uint8),
+    }
+    candidates = [
+        CandidateFrame(0, 0.0, change_score=0.0, stability_score=0.98, notes=["initial"]),
+        CandidateFrame(3, 1.5, change_score=0.62, stability_score=0.96, notes=["change-adjacent"]),
+        CandidateFrame(4, 2.0, change_score=0.02, stability_score=0.95, notes=[]),
+    ]
+
+    selection = select_stable_views_from_frame_map(
+        frames,
+        candidates,
+        source_frame_indexes={0: 0, 3: 18, 4: 24},
+        min_content_score=0.02,
+    )
+
+    assert [view.frame_index for view in selection.accepted] == [0, 3]
+    assert [view.source_frame_index for view in selection.accepted] == [0, 18]
+    rejected_notes = {item.frame_index: item.notes for item in selection.rejected}
     assert "too-small-content" in rejected_notes[4]
 
 

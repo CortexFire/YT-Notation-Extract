@@ -10,6 +10,7 @@ from .config import build_config
 from .errors import SheetVideoToPdfError
 from .models import AppConfig, DuplicatePolicy, PageOrientation, PagePreset
 from .pipeline import run_pipeline
+from .progress import run_with_elapsed_tracker
 
 
 @dataclass(frozen=True)
@@ -36,18 +37,22 @@ def parse_args(argv: Sequence[str] | None = None) -> ParsedCli:
     parser.add_argument("--pdf-dpi", type=int)
     parser.add_argument("--no-review-assets", action="store_true")
     parser.add_argument("--no-clean-output", action="store_true")
+    parser.add_argument("--no-debug-files", action="store_true")
 
     namespace = parser.parse_args(argv)
     raw = vars(namespace)
     config_path = raw.pop("config")
     no_review_assets = raw.pop("no_review_assets")
     no_clean_output = raw.pop("no_clean_output")
+    no_debug_files = raw.pop("no_debug_files")
 
     overrides = {key: value for key, value in raw.items() if value is not None}
     if no_review_assets:
         overrides["generate_review_assets"] = False
     if no_clean_output:
         overrides["clean_output"] = False
+    if no_debug_files:
+        overrides["output_debug_files"] = False
 
     return ParsedCli(config_path=config_path, overrides=overrides)
 
@@ -55,11 +60,17 @@ def parse_args(argv: Sequence[str] | None = None) -> ParsedCli:
 def run_cli(
     argv: Sequence[str] | None = None,
     pipeline: Callable[[AppConfig], Path] = run_pipeline,
+    elapsed_interval_seconds: float = 1.0,
 ) -> int:
     try:
         parsed = parse_args(argv)
         config = build_config(parsed.config_path, parsed.overrides)
-        pipeline(config)
+        print("Working... this can take a little while for longer videos.")
+        run_with_elapsed_tracker(
+            pipeline,
+            config,
+            interval_seconds=elapsed_interval_seconds,
+        )
     except SheetVideoToPdfError as exc:
         print(str(exc), file=sys.stderr)
         return 2

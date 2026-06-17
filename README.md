@@ -34,6 +34,8 @@ On Windows, if `python` is not available but the Python launcher is installed, u
 py main.py --input input/video.mp4 --output output/sheet_music.pdf
 ```
 
+The command-line app prints a live elapsed-time tracker while it works.
+
 Optional output controls:
 
 ```bash
@@ -43,8 +45,24 @@ python main.py \
   --output-dir output \
   --page-preset letter \
   --page-orientation portrait \
-  --duplicate-policy flag
+  --duplicate-policy flag \
+  --no-debug-files
 ```
+
+Useful output flags:
+
+- `--output-dir` sets where debug files are written when debug output is enabled.
+- `--no-debug-files` writes only the final PDF. Intermediate page images are still created temporarily so the PDF can be generated, then removed.
+- `--no-review-assets` keeps debug output enabled but skips stable-view and extracted-region review JPGs. Stitched page JPGs and `manifest.json` are still written.
+- `--no-clean-output` prevents the app from deleting prior generated output files before a run.
+
+You can also run the Windows prompt-based app:
+
+```bash
+py windows_app.py
+```
+
+It asks for the MP4 path, whether outputs should be placed next to the MP4, and whether to output debug files. If you choose a custom output location and disable debug files, it asks only for the PDF path. If you enable debug files with a custom output location, it also asks for the debug files folder.
 
 You can also use a JSON config file:
 
@@ -64,6 +82,7 @@ Example config:
   "page_margin_inches": 0.35,
   "target_systems_per_page": "auto",
   "duplicate_policy": "flag",
+  "output_debug_files": false,
   "generate_review_assets": true,
   "jpeg_quality": 92,
   "pdf_dpi": 200,
@@ -73,7 +92,7 @@ Example config:
 
 The tool automatically decides the frame analysis cadence. You do not need to configure a sample rate.
 
-Generated outputs are written under the output folder:
+When `output_debug_files` is true, generated outputs are written under the output folder:
 
 ```text
 output/
@@ -83,6 +102,8 @@ output/
   manifest.json
   sheet_music.pdf
 ```
+
+When `output_debug_files` is false, only the PDF is left in the selected output location.
 
 ## Dependencies
 
