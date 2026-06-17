@@ -132,6 +132,7 @@ def test_interactive_reports_elapsed_time_while_pipeline_runs(tmp_path, capsys):
     output = capsys.readouterr().out
     assert exit_code == 0
     assert output.count("Elapsed time:") >= 2
+    assert "\rElapsed time:" in output
     assert "Finished in" in output
 
 

@@ -76,6 +76,8 @@ def test_run_cli_reports_elapsed_time_while_pipeline_runs_and_when_complete(tmp_
     output = capsys.readouterr().out
     assert exit_code == 0
     assert output.count("Elapsed time:") >= 2
+    assert output.count("\n") == 1
+    assert "\rElapsed time:" in output
     assert "Finished in" in output
 
 
