@@ -16,7 +16,7 @@ def test_interactive_uses_video_folder_defaults(tmp_path, capsys):
 
     exit_code = run_interactive(
         pipeline=fake_pipeline,
-        input_func=_answers(str(video_path), "", ""),
+        input_func=_answers(str(video_path), "y"),
         pause_func=lambda: pauses.append(True),
     )
 
@@ -28,11 +28,13 @@ def test_interactive_uses_video_folder_defaults(tmp_path, capsys):
     assert "Done!" in capsys.readouterr().out
 
 
-def test_interactive_accepts_custom_output_pdf(tmp_path):
+def test_interactive_accepts_custom_output_locations_after_declining_defaults(tmp_path):
     video_path = tmp_path / "lesson.mp4"
     video_path.write_bytes(b"mp4")
     output_pdf = tmp_path / "custom.pdf"
+    output_dir = tmp_path / "custom_assets"
     seen = {}
+    prompts = []
 
     def fake_pipeline(config):
         seen["config"] = config
@@ -40,13 +42,45 @@ def test_interactive_accepts_custom_output_pdf(tmp_path):
 
     exit_code = run_interactive(
         pipeline=fake_pipeline,
-        input_func=_answers(str(video_path), str(output_pdf), ""),
+        input_func=_answers(str(video_path), "n", str(output_pdf), str(output_dir), prompts=prompts),
         pause_func=lambda: None,
     )
 
     assert exit_code == 0
     assert seen["config"].output_pdf == output_pdf
+    assert seen["config"].output_dir == output_dir
+    assert prompts == [
+        "MP4 video path: ",
+        "Place outputs next to the MP4? [y/n]: ",
+        "Output PDF path: ",
+        "Review assets folder: ",
+    ]
+
+
+def test_interactive_reprompts_for_same_folder_confirmation(tmp_path):
+    video_path = tmp_path / "lesson.mp4"
+    video_path.write_bytes(b"mp4")
+    seen = {}
+    prompts = []
+
+    def fake_pipeline(config):
+        seen["config"] = config
+        return config.output_pdf
+
+    exit_code = run_interactive(
+        pipeline=fake_pipeline,
+        input_func=_answers(str(video_path), "maybe", "y", prompts=prompts),
+        pause_func=lambda: None,
+    )
+
+    assert exit_code == 0
+    assert seen["config"].output_pdf == tmp_path / "lesson_sheet_music.pdf"
     assert seen["config"].output_dir == tmp_path / "lesson_sheet_music_assets"
+    assert prompts == [
+        "MP4 video path: ",
+        "Place outputs next to the MP4? [y/n]: ",
+        "Please enter y or n: ",
+    ]
 
 
 def test_interactive_reports_missing_input_without_running_pipeline(tmp_path, capsys):
@@ -79,7 +113,7 @@ def test_interactive_reports_pipeline_errors_and_pauses(tmp_path, capsys):
 
     exit_code = run_interactive(
         pipeline=fake_pipeline,
-        input_func=_answers(str(video_path), "", ""),
+        input_func=_answers(str(video_path), "y"),
         pause_func=lambda: pauses.append(True),
     )
 
@@ -88,10 +122,12 @@ def test_interactive_reports_pipeline_errors_and_pauses(tmp_path, capsys):
     assert "bad config" in capsys.readouterr().out
 
 
-def _answers(*values):
+def _answers(*values, prompts=None):
     answers = iter(values)
 
-    def input_func(_prompt):
+    def input_func(prompt):
+        if prompts is not None:
+            prompts.append(prompt)
         return next(answers)
 
     return input_func

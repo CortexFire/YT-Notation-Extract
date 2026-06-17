@@ -51,21 +51,18 @@ def _run_prompt_flow(pipeline: PipelineFunc, input_func: InputFunc) -> int:
     default_output_pdf = input_video.with_name(f"{input_video.stem}_sheet_music.pdf")
     default_output_dir = input_video.with_name(f"{input_video.stem}_sheet_music_assets")
 
-    output_pdf = _prompt_path(
-        input_func,
-        f"Output PDF path [{default_output_pdf}]: ",
-        default=default_output_pdf,
-    )
-    output_dir = _prompt_path(
-        input_func,
-        f"Review assets folder [{default_output_dir}]: ",
-        default=default_output_dir,
-    )
+    use_video_folder = _prompt_yes_no(input_func, "Place outputs next to the MP4? [y/n]: ")
+    if use_video_folder:
+        output_pdf = default_output_pdf
+        output_dir = default_output_dir
+    else:
+        output_pdf = _prompt_required_path(input_func, "Output PDF path: ")
+        output_dir = _prompt_required_path(input_func, "Review assets folder: ")
 
     config = AppConfig(
         input_video=input_video,
-        output_pdf=output_pdf or default_output_pdf,
-        output_dir=output_dir or default_output_dir,
+        output_pdf=output_pdf,
+        output_dir=output_dir,
     )
 
     print()
@@ -89,6 +86,20 @@ def _prompt_path(input_func: InputFunc, prompt: str, *, default: Path | None = N
     if not raw_value:
         return default
     return Path(_strip_wrapping_quotes(raw_value)).expanduser()
+
+
+def _prompt_required_path(input_func: InputFunc, prompt: str) -> Path:
+    output_path = _prompt_path(input_func, prompt)
+    while output_path is None:
+        output_path = _prompt_path(input_func, "Please enter a path: ")
+    return output_path
+
+
+def _prompt_yes_no(input_func: InputFunc, prompt: str) -> bool:
+    raw_value = input_func(prompt).strip().lower()
+    while raw_value not in {"y", "n"}:
+        raw_value = input_func("Please enter y or n: ").strip().lower()
+    return raw_value == "y"
 
 
 def _strip_wrapping_quotes(value: str) -> str:
