@@ -24,7 +24,10 @@ from .output import (
 )
 from .pagination import paginate_strips
 from .regions import detect_notation_region
-from .stable_views import select_stable_views_from_frame_map
+from .stable_views import (
+    preselect_stable_candidates_from_prepared,
+    select_stable_views_from_frame_map,
+)
 from .stitching import stitch_regions
 from .video import validate_mp4
 
@@ -41,7 +44,14 @@ def run_pipeline(config: AppConfig) -> Path:
             sample_analysis.prepared_frames,
             fps=sample_analysis.sampled_fps,
         )
-        candidate_sample_indexes = {candidate.frame_index for candidate in cadence.candidates}
+        stable_preselection = preselect_stable_candidates_from_prepared(
+            sample_analysis.prepared_frames,
+            cadence.candidates,
+        )
+        candidate_sample_indexes = {
+            candidate.frame_index
+            for candidate in stable_preselection.candidates
+        }
         frames_by_sample_index = read_sampled_frames_by_index(
             config.input_video,
             sample_analysis.refs,
@@ -53,7 +63,7 @@ def run_pipeline(config: AppConfig) -> Path:
         }
         stable_selection = select_stable_views_from_frame_map(
             frames_by_sample_index,
-            cadence.candidates,
+            stable_preselection.candidates,
             source_frame_indexes=source_frame_indexes,
         )
         stable_views = _write_stable_views(
@@ -113,6 +123,7 @@ def run_pipeline(config: AppConfig) -> Path:
                 stitched_pages=stitched_pages,
                 warnings=[
                     *(f"candidate {item.frame_index}: {', '.join(item.notes)}" for item in cadence.rejected_candidates),
+                    *(f"stable candidate {item.frame_index}: {', '.join(item.notes)}" for item in stable_preselection.rejected),
                     *(f"stable candidate {item.frame_index}: {', '.join(item.notes)}" for item in stable_selection.rejected),
                     *stitch_result.warnings,
                 ],

@@ -11,7 +11,11 @@ from sheet_video_to_pdf.cadence import (
 )
 from sheet_video_to_pdf.models import CadenceDecision, StableView
 from sheet_video_to_pdf.preprocess import prepare_for_comparison
-from sheet_video_to_pdf.stable_views import select_stable_views, select_stable_views_from_frame_map
+from sheet_video_to_pdf.stable_views import (
+    preselect_stable_candidates_from_prepared,
+    select_stable_views,
+    select_stable_views_from_frame_map,
+)
 
 
 def _notation_frame(y_offset: int = 0, height: int = 96, width: int = 128) -> np.ndarray:
@@ -172,6 +176,33 @@ def test_select_stable_views_from_frame_map_keeps_source_frame_indexes() -> None
     assert [view.source_frame_index for view in selection.accepted] == [0, 18]
     rejected_notes = {item.frame_index: item.notes for item in selection.rejected}
     assert "too-small-content" in rejected_notes[4]
+
+
+def test_preselect_stable_candidates_from_prepared_rejects_obvious_non_unique_frames() -> None:
+    frames = [
+        _notation_frame(0),
+        _notation_frame(0),
+        np.full((96, 128, 3), 245, dtype=np.uint8),
+        _notation_frame(20),
+    ]
+    prepared = [prepare_for_comparison(frame, max_dimension=160) for frame in frames]
+    candidates = [
+        CandidateFrame(0, 0.0, change_score=0.0, stability_score=0.98, notes=["initial"]),
+        CandidateFrame(1, 0.5, change_score=0.01, stability_score=0.99, notes=[]),
+        CandidateFrame(2, 1.0, change_score=0.02, stability_score=0.98, notes=[]),
+        CandidateFrame(3, 1.5, change_score=0.62, stability_score=0.96, notes=["change-adjacent"]),
+    ]
+
+    selection = preselect_stable_candidates_from_prepared(
+        prepared,
+        candidates,
+        min_content_score=0.02,
+    )
+
+    assert [candidate.frame_index for candidate in selection.candidates] == [0, 3]
+    rejected_notes = {item.frame_index: item.notes for item in selection.rejected}
+    assert "prepared-static-hold-collapsed" in rejected_notes[1]
+    assert "too-small-content" in rejected_notes[2]
 
 
 def test_select_stable_views_rejects_blurred_notation_even_without_upstream_motion_note() -> None:

@@ -34,6 +34,11 @@ def stitch_regions(
 ) -> StitchResult:
     strips: list[StitchedStrip] = []
     warnings: list[str] = []
+    complete_region_ids = {
+        region.id
+        for region in regions
+        if region.kind is RegionKind.COMPLETE_PAGE
+    }
 
     for region in sorted(regions, key=lambda item: item.source_timestamp_seconds):
         image = _as_gray(images_by_region_id[region.id])
@@ -41,7 +46,12 @@ def stitch_regions(
             strips.append(_new_strip(region, image, len(strips) + 1))
             continue
 
-        if not strips or strips[-1].included_region_ids and _last_region_was_complete(regions, strips[-1]):
+        last_strip_was_complete = (
+            bool(strips)
+            and bool(strips[-1].included_region_ids)
+            and _last_region_was_complete(complete_region_ids, strips[-1])
+        )
+        if not strips or last_strip_was_complete:
             strips.append(_new_strip(region, image, len(strips) + 1))
             continue
 
@@ -111,9 +121,8 @@ def _replace_strip(
     )
 
 
-def _last_region_was_complete(regions: Sequence[ExtractedRegion], strip: StitchedStrip) -> bool:
-    complete_ids = {region.id for region in regions if region.kind is RegionKind.COMPLETE_PAGE}
-    return strip.included_region_ids[-1] in complete_ids
+def _last_region_was_complete(complete_region_ids: set[str], strip: StitchedStrip) -> bool:
+    return strip.included_region_ids[-1] in complete_region_ids
 
 
 def _best_vertical_overlap(base: np.ndarray, incoming: np.ndarray) -> tuple[int, float]:

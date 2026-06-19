@@ -36,18 +36,40 @@ def flag_duplicate_regions(
     if image_loader is None:
         image_loader = _load_image
 
-    flags: list[DuplicateFlags] = []
-    prior: list[_PreparedRegion] = []
+    prepared_regions = [
+        _prepare_region(region, images_by_region_id, image_loader)
+        for region in regions
+    ]
+    valid_prepared = [
+        prepared
+        for prepared in prepared_regions
+        if prepared is not None
+    ]
+    valid_region_indexes = [
+        index
+        for index, prepared in enumerate(prepared_regions)
+        if prepared is not None
+    ]
+    valid_positions_by_region_index = {
+        region_index: valid_position
+        for valid_position, region_index in enumerate(valid_region_indexes)
+    }
+    full_stack, content_stack, density_array = _feature_stacks(valid_prepared)
 
-    for region in regions:
-        prepared = _prepare_region(region, images_by_region_id, image_loader)
+    flags: list[DuplicateFlags] = []
+
+    for region_index, region in enumerate(regions):
+        prepared = prepared_regions[region_index]
         if prepared is None:
             flags.append(DuplicateFlags())
             continue
 
-        match, similarity, exact_duplicate, near_duplicate = _best_prior_match(
-            prepared,
-            prior,
+        match, similarity, exact_duplicate, near_duplicate = _best_prior_match_vectorized(
+            valid_positions_by_region_index[region_index],
+            valid_prepared,
+            full_stack,
+            content_stack,
+            density_array,
             exact_threshold=exact_threshold,
             near_threshold=near_threshold,
         )
@@ -71,7 +93,6 @@ def flag_duplicate_regions(
                 similarity=similarity if match is not None else None,
             )
         )
-        prior.append(prepared)
 
     return flags
 
@@ -96,52 +117,40 @@ def apply_duplicate_policy(
     return list(regions)
 
 
-def _best_prior_match(
-    current: _PreparedRegion,
-    prior: Sequence[_PreparedRegion],
+def _best_prior_match_vectorized(
+    current_position: int,
+    prepared_regions: Sequence[_PreparedRegion],
+    full_stack: np.ndarray,
+    content_stack: np.ndarray,
+    content_density: np.ndarray,
     *,
     exact_threshold: float,
     near_threshold: float,
 ) -> tuple[_PreparedRegion | None, float | None, bool, bool]:
-    best_match: _PreparedRegion | None = None
-    best_similarity: float | None = None
-    best_exact = False
-
-    for candidate in prior:
-        similarity, exact_similarity = _region_similarity(current, candidate)
-        if best_similarity is None or similarity > best_similarity:
-            best_match = candidate
-            best_similarity = similarity
-            best_exact = exact_similarity >= exact_threshold
-
-    if best_match is None or best_similarity is None:
+    if current_position <= 0:
         return None, None, False, False
 
-    near_duplicate = best_similarity >= near_threshold or best_exact
-    return best_match, best_similarity, best_exact, near_duplicate
+    current_full = full_stack[current_position]
+    current_content = content_stack[current_position]
+    prior_full = full_stack[:current_position]
+    prior_content = content_stack[:current_position]
 
-
-def _region_similarity(
-    first: _PreparedRegion,
-    second: _PreparedRegion,
-) -> tuple[float, float]:
-    if _has_content_mismatch(first, second):
-        return 0.0, 0.0
-
-    full_similarity = _normalized_pixel_similarity(first.full_image, second.full_image)
-    content_similarity = _normalized_pixel_similarity(
-        first.content_image,
-        second.content_image,
-    )
-
+    full_similarity = 1.0 - np.mean(np.abs(prior_full - current_full), axis=1)
+    content_similarity = 1.0 - np.mean(np.abs(prior_content - current_content), axis=1)
     blended_content_similarity = (full_similarity + content_similarity) / 2.0
-    return max(full_similarity, blended_content_similarity), full_similarity
+    similarities = np.maximum(full_similarity, blended_content_similarity)
 
+    current_has_content = content_density[current_position] >= _MIN_CONTENT_DENSITY
+    prior_has_content = content_density[:current_position] >= _MIN_CONTENT_DENSITY
+    similarities = np.where(prior_has_content == current_has_content, similarities, 0.0)
+    similarities = np.clip(similarities, 0.0, 1.0)
+    full_similarity = np.clip(full_similarity, 0.0, 1.0)
 
-def _has_content_mismatch(first: _PreparedRegion, second: _PreparedRegion) -> bool:
-    first_has_content = first.content_density >= _MIN_CONTENT_DENSITY
-    second_has_content = second.content_density >= _MIN_CONTENT_DENSITY
-    return first_has_content != second_has_content
+    best_position = int(np.argmax(similarities))
+    best_similarity = float(similarities[best_position])
+    best_exact = bool(full_similarity[best_position] >= exact_threshold)
+    near_duplicate = best_similarity >= near_threshold or best_exact
+    return prepared_regions[best_position], best_similarity, best_exact, near_duplicate
 
 
 def _prepare_region(
@@ -230,9 +239,24 @@ def _resize(image: np.ndarray, size: tuple[int, int]) -> np.ndarray:
     return resized.astype(np.float32) / 255.0
 
 
-def _normalized_pixel_similarity(first: np.ndarray, second: np.ndarray) -> float:
-    difference = np.mean(np.abs(first - second))
-    return float(max(0.0, 1.0 - difference))
+def _feature_stacks(
+    prepared_regions: Sequence[_PreparedRegion],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if not prepared_regions:
+        empty = np.empty((0, 0), dtype=np.float32)
+        return empty, empty, np.empty((0,), dtype=np.float32)
+
+    full_stack = np.stack(
+        [prepared.full_image.reshape(-1) for prepared in prepared_regions],
+    ).astype(np.float32, copy=False)
+    content_stack = np.stack(
+        [prepared.content_image.reshape(-1) for prepared in prepared_regions],
+    ).astype(np.float32, copy=False)
+    density_array = np.array(
+        [prepared.content_density for prepared in prepared_regions],
+        dtype=np.float32,
+    )
+    return full_stack, content_stack, density_array
 
 
 def _load_image(path: Path) -> np.ndarray:
