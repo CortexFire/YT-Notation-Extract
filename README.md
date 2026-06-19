@@ -62,7 +62,25 @@ You can also run the Windows prompt-based app:
 py windows_app.py
 ```
 
-It asks for the MP4 path, whether outputs should be placed next to the MP4, and whether to output debug files. If you choose a custom output location and disable debug files, it asks only for the PDF path. If you enable debug files with a custom output location, it also asks for the debug files folder.
+It asks for the MP4 path, whether outputs should be placed next to the MP4, whether to output debug files, and whether the PDF should be portrait (`p`) or landscape (`l`). If you choose a custom output location and disable debug files, it asks only for the PDF path. If you enable debug files with a custom output location, it also asks for the debug files folder.
+
+## One-click Windows app
+
+Build the double-clickable Windows executable:
+
+```powershell
+py -m pip install -r requirements.txt
+py -m pip install -r requirements-dev.txt
+.\scripts\build-windows.ps1
+```
+
+Then run:
+
+```text
+dist\SheetVideoToPdf.exe
+```
+
+Double-clicking the EXE opens the same prompt-based app. Paste the MP4 path, choose whether to place outputs next to the MP4, and choose whether to keep debug files. The window stays open at the end so the success message or any readable error can be seen.
 
 You can also use a JSON config file:
 

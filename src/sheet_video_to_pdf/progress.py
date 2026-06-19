@@ -4,7 +4,11 @@ import sys
 import threading
 import time
 from types import TracebackType
-from typing import Callable, TextIO
+from typing import Callable, TextIO, TypeVar
+
+
+TConfig = TypeVar("TConfig")
+TResult = TypeVar("TResult")
 
 
 class ElapsedTimeTracker:
@@ -81,3 +85,14 @@ def format_elapsed(total_seconds: int) -> str:
     if minutes:
         return f"{minutes}m {seconds}s"
     return f"{seconds}s"
+
+
+def run_with_elapsed_tracker(
+    operation: Callable[[TConfig], TResult],
+    config: TConfig,
+    *,
+    interval_seconds: float = 1.0,
+    stream: TextIO | None = None,
+) -> TResult:
+    with ElapsedTimeTracker(interval=interval_seconds, stream=stream):
+        return operation(config)

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Callable
 
 from .errors import SheetVideoToPdfError
-from .models import AppConfig
+from .models import AppConfig, PageOrientation
 from .pipeline import run_pipeline
 from .progress import run_with_elapsed_tracker
 
@@ -19,13 +19,13 @@ def run_interactive(
     pipeline: PipelineFunc = run_pipeline,
     input_func: InputFunc = input,
     pause_func: PauseFunc | None = None,
-    elapsed_interval_seconds: float = 1.0,
+    progress_interval: float = 1.0,
 ) -> int:
     if pause_func is None:
         pause_func = _pause
 
     try:
-        return _run_prompt_flow(pipeline, input_func, elapsed_interval_seconds)
+        return _run_prompt_flow(pipeline, input_func, progress_interval)
     finally:
         pause_func()
 
@@ -33,7 +33,7 @@ def run_interactive(
 def _run_prompt_flow(
     pipeline: PipelineFunc,
     input_func: InputFunc,
-    elapsed_interval_seconds: float,
+    progress_interval: float,
 ) -> int:
     print("Sheet Video to PDF")
     print("==================")
@@ -72,11 +72,14 @@ def _run_prompt_flow(
     else:
         output_dir = output_pdf.parent
 
+    page_orientation = _prompt_page_orientation(input_func)
+
     config = AppConfig(
         input_video=input_video,
         output_pdf=output_pdf,
         output_dir=output_dir,
         output_debug_files=output_debug_files,
+        page_orientation=page_orientation,
     )
 
     print()
@@ -85,7 +88,7 @@ def _run_prompt_flow(
         pdf_path = run_with_elapsed_tracker(
             pipeline,
             config,
-            interval_seconds=elapsed_interval_seconds,
+            interval_seconds=progress_interval,
         )
     except SheetVideoToPdfError as exc:
         print()
@@ -119,6 +122,17 @@ def _prompt_yes_no(input_func: InputFunc, prompt: str) -> bool:
     while raw_value not in {"y", "n"}:
         raw_value = input_func("Please enter y or n: ").strip().lower()
     return raw_value == "y"
+
+
+def _prompt_page_orientation(input_func: InputFunc) -> PageOrientation:
+    options = {
+        "p": PageOrientation.PORTRAIT,
+        "l": PageOrientation.LANDSCAPE,
+    }
+    raw_value = input_func("PDF orientation [p/l]: ").strip().lower()
+    while raw_value not in options:
+        raw_value = input_func("Please enter p or l: ").strip().lower()
+    return options[raw_value]
 
 
 def _strip_wrapping_quotes(value: str) -> str:

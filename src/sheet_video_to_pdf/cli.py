@@ -60,16 +60,15 @@ def parse_args(argv: Sequence[str] | None = None) -> ParsedCli:
 def run_cli(
     argv: Sequence[str] | None = None,
     pipeline: Callable[[AppConfig], Path] = run_pipeline,
-    elapsed_interval_seconds: float = 1.0,
+    progress_interval: float = 1.0,
 ) -> int:
     try:
         parsed = parse_args(argv)
         config = build_config(parsed.config_path, parsed.overrides)
-        print("Working... this can take a little while for longer videos.")
         run_with_elapsed_tracker(
             pipeline,
             config,
-            interval_seconds=elapsed_interval_seconds,
+            interval_seconds=progress_interval,
         )
     except SheetVideoToPdfError as exc:
         print(str(exc), file=sys.stderr)
