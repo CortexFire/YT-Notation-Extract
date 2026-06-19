@@ -7,8 +7,14 @@ from typing import Sequence
 import cv2
 import numpy as np
 
+from .errors import UnsupportedLayoutError
 from .models import AppConfig, PageOrientation
 from .stitching import StitchedStrip
+
+_UNSUPPORTED_LAYOUT_MESSAGE = (
+    "The detected score regions are too tall to fit on one PDF page with the current layout. "
+    "Try landscape orientation, smaller margins, or fewer systems per page."
+)
 
 
 @dataclass(frozen=True)
@@ -204,12 +210,23 @@ def _render_page_group(segments: Sequence[np.ndarray], config: AppConfig) -> np.
     max_segment_width = max(segment.shape[1] for segment in segments)
     total_segment_height = sum(segment.shape[0] for segment in segments) + gap * (len(segments) - 1)
     scale = min(content_width / max_segment_width, content_height / total_segment_height)
+    rendered_sizes = [
+        (
+            max(1, int(round(segment.shape[1] * scale))),
+            max(1, int(round(segment.shape[0] * scale))),
+        )
+        for segment in segments
+    ]
+    total_rendered_height = sum(height for _, height in rendered_sizes) + gap * (len(segments) - 1)
+    if total_rendered_height > content_height or any(
+        rendered_width > content_width or rendered_height > content_height
+        for rendered_width, rendered_height in rendered_sizes
+    ):
+        raise UnsupportedLayoutError(_UNSUPPORTED_LAYOUT_MESSAGE)
 
     page = np.full((page_height, page_width), 255, dtype=np.uint8)
     y0 = margin
-    for segment in segments:
-        rendered_width = max(1, int(round(segment.shape[1] * scale)))
-        rendered_height = max(1, int(round(segment.shape[0] * scale)))
+    for segment, (rendered_width, rendered_height) in zip(segments, rendered_sizes):
         resized = cv2.resize(
             segment,
             (rendered_width, rendered_height),

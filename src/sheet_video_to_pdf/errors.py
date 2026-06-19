@@ -12,3 +12,7 @@ class VideoReadError(SheetVideoToPdfError):
 
 class NoNotationError(SheetVideoToPdfError):
     """Raised when no reconstructable notation pages are produced."""
+
+
+class UnsupportedLayoutError(SheetVideoToPdfError):
+    """Raised when detected notation cannot fit the configured PDF layout."""

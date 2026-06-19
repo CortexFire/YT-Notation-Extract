@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from sheet_video_to_pdf.config import DEFAULT_CONFIG
 from sheet_video_to_pdf.models import (
@@ -183,6 +184,35 @@ def test_paginate_strips_packs_short_score_strips_into_portrait_pages() -> None:
         assert rows.max() < page.image.shape[0] - margin
         assert cols.min() >= margin
         assert cols.max() < page.image.shape[1] - margin
+
+
+def test_paginate_strips_reports_oversized_packed_page_as_user_facing_error() -> None:
+    strips = [
+        StitchedStrip(
+            id=f"strip_{index:03d}",
+            image=np.full((height, width), 255, dtype=np.uint8),
+            included_region_ids=[f"region_{index:03d}"],
+            source_start_seconds=float(index),
+            source_end_seconds=float(index),
+            placements=[StitchPlacement(f"strip_{index:03d}", 0, 0, 1.0, "started-strip")],
+        )
+        for index, (height, width) in enumerate(
+            [
+                (930, 1408),
+                (957, 1407),
+                (958, 1407),
+                (958, 1408),
+                (958, 1408),
+                (957, 1407),
+            ],
+            start=1,
+        )
+    ]
+
+    with pytest.raises(Exception, match="too tall to fit on one PDF page") as exc_info:
+        paginate_strips(strips, DEFAULT_CONFIG)
+
+    assert exc_info.type.__name__ == "UnsupportedLayoutError"
 
 
 def test_paginate_strips_balances_long_strip_chunks_to_avoid_sparse_portrait_pages() -> None:
