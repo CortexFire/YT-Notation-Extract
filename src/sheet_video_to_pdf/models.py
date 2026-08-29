@@ -27,6 +27,11 @@ class RegionKind(str, Enum):
     UNKNOWN = "unknown"
 
 
+class LocalizationSource(str, Enum):
+    AUTO = "auto"
+    MANUAL = "manual"
+
+
 @dataclass(frozen=True)
 class AppConfig:
     input_video: Path = Path("input/video.mp4")
@@ -42,6 +47,7 @@ class AppConfig:
     jpeg_quality: int = 92
     pdf_dpi: int = 200
     clean_output: bool = True
+    notation_roi: BoundingBox | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,16 @@ class BoundingBox:
 
     def to_tuple(self) -> tuple[int, int, int, int]:
         return (self.x, self.y, self.width, self.height)
+
+
+@dataclass(frozen=True)
+class NotationLocalization:
+    bounding_box: BoundingBox
+    confidence: float
+    source: LocalizationSource
+    support_count: int
+    probe_timestamps_seconds: list[float] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -83,6 +99,11 @@ class StableView:
     stability_score: float
     source_frame_index: int | None = None
     rejection_notes: list[str] = field(default_factory=list)
+    source_start_seconds: float | None = None
+    source_end_seconds: float | None = None
+    source_frame_indexes: list[int] = field(default_factory=list)
+    composite_frame_count: int = 1
+    cleanup_confidence: float | None = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +156,7 @@ class StitchedPage:
 @dataclass(frozen=True)
 class RunManifest:
     video: VideoMetadata
+    notation_localization: NotationLocalization | None = None
     cadence_decisions: list[CadenceDecision] = field(default_factory=list)
     stable_views: list[StableView] = field(default_factory=list)
     extracted_regions: list[ExtractedRegion] = field(default_factory=list)

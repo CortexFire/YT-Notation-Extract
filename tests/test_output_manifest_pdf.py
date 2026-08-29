@@ -13,6 +13,8 @@ from sheet_video_to_pdf.models import (
     BoundingBox,
     CadenceDecision,
     ExtractedRegion,
+    LocalizationSource,
+    NotationLocalization,
     RegionKind,
     RunManifest,
     StableView,
@@ -36,6 +38,7 @@ def test_prepare_output_dirs_creates_expected_subdirectories(tmp_path: Path) -> 
     paths = prepare_output_dirs(config)
 
     assert paths.output_dir == tmp_path / "out"
+    assert paths.localization_dir.is_dir()
     assert paths.stable_views_dir.is_dir()
     assert paths.extracted_regions_dir.is_dir()
     assert paths.stitched_pages_dir.is_dir()
@@ -44,25 +47,29 @@ def test_prepare_output_dirs_creates_expected_subdirectories(tmp_path: Path) -> 
 def test_prepare_output_dirs_safely_cleans_only_generated_locations(tmp_path: Path) -> None:
     output_dir = tmp_path / "out"
     stable_dir = output_dir / "stable_views"
+    localization_dir = output_dir / "localization"
     regions_dir = output_dir / "extracted_regions"
     pages_dir = output_dir / "stitched_pages"
     stable_dir.mkdir(parents=True)
+    localization_dir.mkdir()
     regions_dir.mkdir()
     pages_dir.mkdir()
     stale_view = stable_dir / "view_001.jpg"
+    stale_preview = localization_dir / "roi_preview.jpg"
     stale_region = regions_dir / "region_001.jpg"
     stale_page = pages_dir / "page_001.jpg"
     manifest = output_dir / "manifest.json"
     pdf = output_dir / "sheet_music.pdf"
     outside_file = output_dir / "keep_me.txt"
     nested_outside = tmp_path / "outside.pdf"
-    for path in [stale_view, stale_region, stale_page, manifest, pdf, outside_file, nested_outside]:
+    for path in [stale_view, stale_preview, stale_region, stale_page, manifest, pdf, outside_file, nested_outside]:
         path.write_bytes(b"stale")
     config = AppConfig(output_dir=output_dir, output_pdf=pdf, clean_output=True)
 
     prepare_output_dirs(config)
 
     assert not stale_view.exists()
+    assert not stale_preview.exists()
     assert not stale_region.exists()
     assert not stale_page.exists()
     assert not manifest.exists()
@@ -96,11 +103,14 @@ def test_artifact_writer_writes_sequential_jpegs_without_rescanning(tmp_path: Pa
     image = Image.new("RGB", (12, 8), "white")
 
     first_view = writer.write_stable_view_image(image)
+    preview = writer.write_localization_preview(image)
     second_view = writer.write_stable_view_image(image)
     first_region = writer.write_region_image(image)
     first_page = writer.write_stitched_page_image(image)
 
     assert first_view == paths.stable_views_dir / "view_001.jpg"
+    assert preview == paths.localization_dir / "roi_preview.jpg"
+    assert preview.exists()
     assert second_view == paths.stable_views_dir / "view_002.jpg"
     assert first_region == paths.extracted_regions_dir / "region_001.jpg"
     assert first_page == paths.stitched_pages_dir / "page_001.jpg"
@@ -116,6 +126,13 @@ def test_write_manifest_serializes_run_manifest_json(tmp_path: Path) -> None:
             width=1920,
             height=1080,
         ),
+        notation_localization=NotationLocalization(
+            bounding_box=BoundingBox(x=0, y=0, width=1920, height=320),
+            confidence=0.96,
+            source=LocalizationSource.AUTO,
+            support_count=12,
+            probe_timestamps_seconds=[0.0, 6.0, 12.0],
+        ),
         cadence_decisions=[
             CadenceDecision(start_seconds=0.0, end_seconds=12.5, interval_seconds=0.5, reason="stable")
         ],
@@ -126,6 +143,11 @@ def test_write_manifest_serializes_run_manifest_json(tmp_path: Path) -> None:
                 frame_index=38,
                 frame_path=Path("output/stable_views/view_001.jpg"),
                 stability_score=0.98,
+                source_start_seconds=1.0,
+                source_end_seconds=2.0,
+                source_frame_indexes=[30, 38, 45],
+                composite_frame_count=3,
+                cleanup_confidence=0.99,
             )
         ],
         extracted_regions=[
@@ -156,8 +178,17 @@ def test_write_manifest_serializes_run_manifest_json(tmp_path: Path) -> None:
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest_path == tmp_path / "out" / "manifest.json"
     assert data["video"]["path"] == "input/video.mp4"
+    assert data["notation_localization"]["source"] == "auto"
+    assert data["notation_localization"]["bounding_box"] == {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 320,
+    }
     assert data["cadence_decisions"][0]["reason"] == "stable"
     assert data["stable_views"][0]["frame_path"] == "output/stable_views/view_001.jpg"
+    assert data["stable_views"][0]["source_frame_indexes"] == [30, 38, 45]
+    assert data["stable_views"][0]["cleanup_confidence"] == 0.99
     assert data["extracted_regions"][0]["bounding_box"] == {"x": 1, "y": 2, "width": 300, "height": 120}
     assert data["extracted_regions"][0]["kind"] == "partial_view"
     assert data["stitched_pages"][0]["warnings"] == ["low whitespace confidence"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from sheet_video_to_pdf.models import BoundingBox
 from sheet_video_to_pdf.sampling import (
     SampledFrameRef,
     analyze_sampled_frames,
@@ -71,6 +72,38 @@ def test_analyze_sampled_frames_records_refs_and_prepared_images(tmp_path):
     assert [ref.timestamp_seconds for ref in analysis.refs[:3]] == [0.0, 0.5, 1.0]
     assert all(frame.ndim == 2 for frame in analysis.prepared_frames)
     assert max(analysis.prepared_frames[0].shape) <= 160
+
+
+def test_analyze_sampled_frames_prepares_only_notation_roi(tmp_path):
+    video_path = tmp_path / "outside-motion.mp4"
+    writer = cv2.VideoWriter(
+        str(video_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        2.0,
+        (160, 100),
+    )
+    roi = BoundingBox(20, 10, 120, 45)
+    rng = np.random.default_rng(42)
+    for _ in range(4):
+        frame = rng.integers(0, 255, size=(100, 160, 3), dtype=np.uint8)
+        frame[10:55, 20:140] = 250
+        for line in range(5):
+            cv2.line(frame, (25, 20 + line * 5), (135, 20 + line * 5), (10, 10, 10), 1)
+        writer.write(frame)
+    writer.release()
+
+    analysis = analyze_sampled_frames(
+        video_path,
+        source_fps=2.0,
+        target_fps=2.0,
+        notation_roi=roi,
+    )
+
+    assert len(analysis.prepared_frames) == 4
+    assert all(
+        np.mean(first != second) < 0.01
+        for first, second in zip(analysis.prepared_frames, analysis.prepared_frames[1:])
+    )
 
 
 def test_analyze_sampled_frames_grabs_skipped_frames_without_decoding(monkeypatch):

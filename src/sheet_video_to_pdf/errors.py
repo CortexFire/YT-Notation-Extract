@@ -16,3 +16,7 @@ class NoNotationError(SheetVideoToPdfError):
 
 class UnsupportedLayoutError(SheetVideoToPdfError):
     """Raised when detected notation cannot fit the configured PDF layout."""
+
+
+class NotationLocalizationError(SheetVideoToPdfError):
+    """Raised when a reliable notation area cannot be localized or cleaned."""

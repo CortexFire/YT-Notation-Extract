@@ -45,6 +45,43 @@ def create_moving_sheet_music_video(
     return output_path
 
 
+def create_cluttered_score_video(
+    path: str | Path,
+    *,
+    variants: tuple[int, ...] = (0, 1, 2),
+    hold_frames: int = 8,
+    fps: float = 4.0,
+) -> Path:
+    """Create fixed top notation with moving overlays and unrelated lower-frame motion."""
+    output_path = Path(path)
+    frames: list[np.ndarray] = []
+    rng = np.random.default_rng(17)
+    for variant in variants:
+        for hold_index in range(hold_frames):
+            frame = np.full((360, 640, 3), 28, dtype=np.uint8)
+            frame[18:150, 10:630] = 250
+            for staff_top in (56, 104):
+                for line_index in range(5):
+                    y = staff_top + line_index * 5
+                    cv2.line(frame, (24, y), (616, y), (20, 20, 20), 1)
+                starts = (80, 190, 300, 420) if variant % 2 == 0 else (125, 235, 350, 465)
+                for note_index, note_x in enumerate(starts):
+                    shifted_x = note_x + variant * 7
+                    note_y = staff_top + 4 + (note_index % 4) * 3
+                    cv2.circle(frame, (shifted_x, note_y), 4, (15, 15, 15), -1)
+                    cv2.line(frame, (shifted_x + 4, note_y), (shifted_x + 4, note_y - 18), (15, 15, 15), 1)
+            cursor_x = 55 + hold_index * 70
+            cv2.line(frame, (cursor_x, 42), (cursor_x, 137), (20, 225, 40), 5)
+            frame[170:270] = rng.integers(0, 255, size=frame[170:270].shape, dtype=np.uint8)
+            frame[285:350] = 245
+            cv2.line(frame, (0, 285), (639, 285), (10, 10, 10), 2)
+            for x in range(0, 640, 24):
+                cv2.line(frame, (x, 285), (x, 350), (15, 15, 15), 2)
+            frames.append(frame)
+    _write_mp4(output_path, frames, fps)
+    return output_path
+
+
 def _sheet_frame(
     *,
     frame_size: tuple[int, int],

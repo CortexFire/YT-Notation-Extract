@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ConfigError
-from .models import AppConfig, DuplicatePolicy, PageOrientation, PagePreset
+from .models import AppConfig, BoundingBox, DuplicatePolicy, PageOrientation, PagePreset
 
 DEFAULT_CONFIG = AppConfig()
 
@@ -90,6 +90,8 @@ def _convert_value(key: str, value: Any) -> Any:
         return _enum_value(PageOrientation, value, key)
     if key == "duplicate_policy":
         return _enum_value(DuplicatePolicy, value, key)
+    if key == "notation_roi":
+        return _notation_roi(value)
     if key == "page_margin_inches":
         margin = float(value)
         if margin < 0:
@@ -117,6 +119,29 @@ def _convert_value(key: str, value: Any) -> Any:
             raise ValueError(f"{key} must be true or false")
         return value
     return value
+
+
+def _notation_roi(value: Any) -> BoundingBox:
+    if isinstance(value, BoundingBox):
+        return value
+    if not isinstance(value, dict) or set(value) != {"x", "y", "width", "height"}:
+        raise ValueError(
+            "notation_roi must be an object with x, y, width, and height"
+        )
+    try:
+        box = BoundingBox(
+            x=int(value["x"]),
+            y=int(value["y"]),
+            width=int(value["width"]),
+            height=int(value["height"]),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("notation_roi values must be integers") from exc
+    if box.x < 0 or box.y < 0 or box.width <= 0 or box.height <= 0:
+        raise ValueError(
+            "notation_roi x and y must be non-negative and width and height must be positive"
+        )
+    return box
 
 
 def _enum_value(enum_type: type, value: Any, key: str) -> Any:

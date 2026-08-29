@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import subprocess
 import sys
 import time
@@ -6,9 +7,9 @@ import time
 from sheet_video_to_pdf.cli import parse_args, run_cli
 from sheet_video_to_pdf.config import DEFAULT_CONFIG
 from sheet_video_to_pdf.errors import ConfigError
-from sheet_video_to_pdf.models import DuplicatePolicy
+from sheet_video_to_pdf.models import BoundingBox, DuplicatePolicy
 from sheet_video_to_pdf.pipeline import _read_sampled_frames, run_pipeline
-from tests.fixtures.synthetic_video import create_moving_sheet_music_video
+from tests.fixtures.synthetic_video import create_cluttered_score_video, create_moving_sheet_music_video
 
 
 def test_parse_args_maps_output_options_without_sample_fps():
@@ -30,6 +31,8 @@ def test_parse_args_maps_output_options_without_sample_fps():
             "5",
             "--duplicate-policy",
             "flag-and-include",
+            "--notation-roi",
+            "10,20,1200,210",
             "--no-review-assets",
             "--no-clean-output",
             "--no-debug-files",
@@ -42,6 +45,7 @@ def test_parse_args_maps_output_options_without_sample_fps():
     assert parsed.overrides["page_margin_inches"] == 0.25
     assert parsed.overrides["target_systems_per_page"] == 5
     assert parsed.overrides["duplicate_policy"] == "flag-and-include"
+    assert parsed.overrides["notation_roi"] == BoundingBox(10, 20, 1200, 210)
     assert parsed.overrides["generate_review_assets"] is False
     assert parsed.overrides["clean_output"] is False
     assert parsed.overrides["output_debug_files"] is False
@@ -127,6 +131,30 @@ def test_pipeline_processes_synthetic_video_end_to_end(tmp_path):
     assert list((config.output_dir / "stable_views").glob("view_*.jpg"))
     assert list((config.output_dir / "extracted_regions").glob("region_*.jpg"))
     assert list((config.output_dir / "stitched_pages").glob("page_*.jpg"))
+
+
+def test_pipeline_localizes_and_cleans_cluttered_score_video(tmp_path):
+    video_path = create_cluttered_score_video(tmp_path / "cluttered.mp4")
+    config = DEFAULT_CONFIG.__class__(
+        input_video=video_path,
+        output_dir=tmp_path / "out",
+        output_pdf=tmp_path / "out" / "sheet_music.pdf",
+        pdf_dpi=80,
+    )
+
+    pdf_path = run_pipeline(config)
+
+    manifest = json.loads((config.output_dir / "manifest.json").read_text(encoding="utf-8"))
+    roi = manifest["notation_localization"]["bounding_box"]
+    assert pdf_path.exists()
+    assert manifest["notation_localization"]["source"] == "auto"
+    assert roi["y"] <= 24
+    assert roi["y"] + roi["height"] <= 165
+    assert len(manifest["stable_views"]) == 3
+    assert all(view["composite_frame_count"] >= 3 for view in manifest["stable_views"])
+    assert all(view["cleanup_confidence"] >= 0.95 for view in manifest["stable_views"])
+    assert all(region["bounding_box"]["height"] < 180 for region in manifest["extracted_regions"])
+    assert (config.output_dir / "localization" / "roi_preview.jpg").exists()
 
 
 def test_pipeline_pdf_only_mode_leaves_only_final_pdf(tmp_path):
