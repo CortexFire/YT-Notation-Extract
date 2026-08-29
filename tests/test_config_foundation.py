@@ -4,7 +4,7 @@ import pytest
 
 from sheet_video_to_pdf.config import DEFAULT_CONFIG, build_config
 from sheet_video_to_pdf.errors import ConfigError
-from sheet_video_to_pdf.models import DuplicatePolicy, PageOrientation, PagePreset
+from sheet_video_to_pdf.models import BoundingBox, DuplicatePolicy, PageOrientation, PagePreset
 
 
 def test_default_config_matches_spec_defaults():
@@ -23,6 +23,7 @@ def test_default_config_matches_spec_defaults():
     assert config.jpeg_quality == 92
     assert config.pdf_dpi == 200
     assert config.clean_output is True
+    assert config.notation_roi is None
 
 
 def test_config_file_values_override_defaults_and_cli_values_override_file(tmp_path):
@@ -85,3 +86,37 @@ def test_config_rejects_sample_fps_and_invalid_duplicate_policy(tmp_path):
     message = str(exc.value)
     assert "sample_fps" in message
     assert "duplicate_policy" in message
+
+
+def test_config_parses_notation_roi_object(tmp_path):
+    config_file = tmp_path / "config.json"
+    config_file.write_text(
+        '{"notation_roi": {"x": 12, "y": 34, "width": 640, "height": 220}}',
+        encoding="utf-8",
+    )
+
+    config = build_config(config_path=config_file)
+
+    assert config.notation_roi == BoundingBox(12, 34, 640, 220)
+
+
+def test_config_accepts_notation_roi_from_cli_parser():
+    box = BoundingBox(12, 34, 640, 220)
+
+    config = build_config(overrides={"notation_roi": box})
+
+    assert config.notation_roi is box
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"x": -1, "y": 0, "width": 100, "height": 100},
+        {"x": 0, "y": 0, "width": 0, "height": 100},
+        {"x": 0, "y": 0, "width": 100},
+        "0,0,100,100",
+    ],
+)
+def test_config_rejects_invalid_notation_roi(value):
+    with pytest.raises(ConfigError, match="notation_roi"):
+        build_config(overrides={"notation_roi": value})

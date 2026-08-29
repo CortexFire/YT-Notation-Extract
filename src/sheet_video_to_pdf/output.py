@@ -11,6 +11,7 @@ from .errors import NoNotationError
 from .models import AppConfig
 
 STABLE_VIEWS_DIRNAME = "stable_views"
+LOCALIZATION_DIRNAME = "localization"
 EXTRACTED_REGIONS_DIRNAME = "extracted_regions"
 STITCHED_PAGES_DIRNAME = "stitched_pages"
 
@@ -18,6 +19,7 @@ STITCHED_PAGES_DIRNAME = "stitched_pages"
 @dataclass(frozen=True)
 class OutputPaths:
     output_dir: Path
+    localization_dir: Path
     stable_views_dir: Path
     extracted_regions_dir: Path
     stitched_pages_dir: Path
@@ -35,6 +37,13 @@ class ArtifactWriter:
 
     def write_stable_view_image(self, image: Image.Image) -> Path:
         return self._write_numbered_jpeg(image, self.paths.stable_views_dir, "view")
+
+    def write_localization_preview(self, image: Image.Image) -> Path:
+        self.paths.localization_dir.mkdir(parents=True, exist_ok=True)
+        path = self.paths.localization_dir / "roi_preview.jpg"
+        image_to_save = image.convert("RGB") if image.mode != "RGB" else image
+        image_to_save.save(path, format="JPEG", quality=self.jpeg_quality)
+        return path
 
     def write_region_image(self, image: Image.Image) -> Path:
         return self._write_numbered_jpeg(image, self.paths.extracted_regions_dir, "region")
@@ -56,6 +65,7 @@ def prepare_output_dirs(config: AppConfig) -> OutputPaths:
     output_dir = Path(config.output_dir)
     paths = OutputPaths(
         output_dir=output_dir,
+        localization_dir=output_dir / LOCALIZATION_DIRNAME,
         stable_views_dir=output_dir / STABLE_VIEWS_DIRNAME,
         extracted_regions_dir=output_dir / EXTRACTED_REGIONS_DIRNAME,
         stitched_pages_dir=output_dir / STITCHED_PAGES_DIRNAME,
@@ -65,6 +75,7 @@ def prepare_output_dirs(config: AppConfig) -> OutputPaths:
         clean_output(config)
 
     if config.output_debug_files:
+        paths.localization_dir.mkdir(parents=True, exist_ok=True)
         paths.stable_views_dir.mkdir(parents=True, exist_ok=True)
         paths.extracted_regions_dir.mkdir(parents=True, exist_ok=True)
         paths.stitched_pages_dir.mkdir(parents=True, exist_ok=True)
@@ -73,7 +84,12 @@ def prepare_output_dirs(config: AppConfig) -> OutputPaths:
 
 def clean_output(config: AppConfig) -> None:
     output_dir = Path(config.output_dir)
-    for dirname in (STABLE_VIEWS_DIRNAME, EXTRACTED_REGIONS_DIRNAME, STITCHED_PAGES_DIRNAME):
+    for dirname in (
+        LOCALIZATION_DIRNAME,
+        STABLE_VIEWS_DIRNAME,
+        EXTRACTED_REGIONS_DIRNAME,
+        STITCHED_PAGES_DIRNAME,
+    ):
         generated_dir = output_dir / dirname
         _unlink_files_inside(generated_dir)
         _rmdir_if_empty(generated_dir)

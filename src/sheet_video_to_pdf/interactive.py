@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Callable
 
 from .errors import SheetVideoToPdfError
-from .models import AppConfig, PageOrientation
+from .models import AppConfig, BoundingBox, PageOrientation
 from .pipeline import run_pipeline
 from .progress import run_with_elapsed_tracker
 
@@ -54,6 +54,8 @@ def _run_prompt_flow(
         print(f"Input video must use the .mp4 extension: {input_video}")
         return 2
 
+    notation_roi = _prompt_notation_roi(input_func)
+
     default_output_pdf = input_video.with_name(f"{input_video.stem}_sheet_music.pdf")
     default_output_dir = input_video.with_name(f"{input_video.stem}_sheet_music_assets")
 
@@ -80,6 +82,7 @@ def _run_prompt_flow(
         output_dir=output_dir,
         output_debug_files=output_debug_files,
         page_orientation=page_orientation,
+        notation_roi=notation_roi,
     )
 
     print()
@@ -133,6 +136,28 @@ def _prompt_page_orientation(input_func: InputFunc) -> PageOrientation:
     while raw_value not in options:
         raw_value = input_func("Please enter p or l: ").strip().lower()
     return options[raw_value]
+
+
+def _prompt_notation_roi(input_func: InputFunc) -> BoundingBox | None:
+    prompt = "Notation area x,y,width,height (leave blank for automatic): "
+    raw_value = input_func(prompt).strip()
+    while raw_value:
+        try:
+            parts = [int(part.strip()) for part in raw_value.split(",")]
+        except ValueError:
+            parts = []
+        if (
+            len(parts) == 4
+            and parts[0] >= 0
+            and parts[1] >= 0
+            and parts[2] > 0
+            and parts[3] > 0
+        ):
+            return BoundingBox(*parts)
+        raw_value = input_func(
+            "Please enter x,y,width,height or leave blank for automatic: "
+        ).strip()
+    return None
 
 
 def _strip_wrapping_quotes(value: str) -> str:

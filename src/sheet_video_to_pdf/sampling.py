@@ -8,7 +8,9 @@ import cv2
 import numpy as np
 
 from .errors import VideoReadError
+from .models import BoundingBox
 from .preprocess import prepare_for_comparison
+from .score_views import prepare_score_for_comparison
 
 
 @dataclass(frozen=True)
@@ -30,6 +32,7 @@ def analyze_sampled_frames(
     path: str | Path,
     source_fps: float,
     target_fps: float = 2.0,
+    notation_roi: BoundingBox | None = None,
 ) -> SampleAnalysis:
     if source_fps <= 0:
         raise VideoReadError("Video frame rate is unreadable; cannot sample frames")
@@ -61,7 +64,14 @@ def analyze_sampled_frames(
                         timestamp_seconds=frame_index / source_fps,
                     )
                 )
-                prepared_frames.append(prepare_for_comparison(frame, max_dimension=160))
+                if notation_roi is None:
+                    prepared = prepare_for_comparison(frame, max_dimension=160)
+                else:
+                    prepared = prepare_score_for_comparison(
+                        _crop_to_roi(frame, notation_roi),
+                        max_dimension=320,
+                    )
+                prepared_frames.append(prepared)
             else:
                 ok = capture.grab()
                 if not ok:
@@ -175,3 +185,17 @@ def _open_capture(path: str | Path) -> cv2.VideoCapture:
             f"OpenCV could not open the MP4: {path}. Verify codec and FFmpeg support."
         )
     return capture
+
+
+def _crop_to_roi(frame: np.ndarray, box: BoundingBox) -> np.ndarray:
+    height, width = frame.shape[:2]
+    if (
+        box.x < 0
+        or box.y < 0
+        or box.width <= 0
+        or box.height <= 0
+        or box.x + box.width > width
+        or box.y + box.height > height
+    ):
+        raise VideoReadError("The notation ROI is outside decoded video frames")
+    return frame[box.y : box.y + box.height, box.x : box.x + box.width]

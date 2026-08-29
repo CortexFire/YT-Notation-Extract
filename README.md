@@ -46,6 +46,7 @@ python main.py \
   --page-preset letter \
   --page-orientation portrait \
   --duplicate-policy flag \
+  --notation-roi 0,0,1280,230 \
   --no-debug-files
 ```
 
@@ -55,6 +56,11 @@ Useful output flags:
 - `--no-debug-files` writes only the final PDF. Intermediate page images are still created temporarily so the PDF can be generated, then removed.
 - `--no-review-assets` keeps debug output enabled but skips stable-view and extracted-region review JPGs. Stitched page JPGs and `manifest.json` are still written.
 - `--no-clean-output` prevents the app from deleting prior generated output files before a run.
+- `--notation-roi x,y,width,height` overrides automatic notation-area detection with source-video pixel coordinates.
+
+By default, the tool detects one fixed notation area from staff-line structure across the video. Frame comparison and duplicate detection use only that area, so instructors, keyboards, visualizers, and captions elsewhere in the frame do not create false score views. Moving colored indicators over the score are removed by combining several frames from each unchanged score view.
+
+If automatic localization or overlay cleanup is not reliable enough, the run stops without writing a misleading PDF. Use the localization preview in the debug assets to review the detected box, or rerun with `--notation-roi` to provide the area explicitly.
 
 You can also run the Windows prompt-based app:
 
@@ -62,7 +68,7 @@ You can also run the Windows prompt-based app:
 py windows_app.py
 ```
 
-It asks for the MP4 path, whether outputs should be placed next to the MP4, whether to output debug files, and whether the PDF should be portrait (`p`) or landscape (`l`). If you choose a custom output location and disable debug files, it asks only for the PDF path. If you enable debug files with a custom output location, it also asks for the debug files folder.
+It asks for the MP4 path, an optional notation area (`x,y,width,height`; blank uses automatic detection), whether outputs should be placed next to the MP4, whether to output debug files, and whether the PDF should be portrait (`p`) or landscape (`l`). If you choose a custom output location and disable debug files, it asks only for the PDF path. If you enable debug files with a custom output location, it also asks for the debug files folder.
 
 ## One-click Windows app
 
@@ -100,6 +106,7 @@ Example config:
   "page_margin_inches": 0.35,
   "target_systems_per_page": "auto",
   "duplicate_policy": "flag",
+  "notation_roi": null,
   "output_debug_files": false,
   "generate_review_assets": true,
   "jpeg_quality": 92,
@@ -110,10 +117,20 @@ Example config:
 
 The tool automatically decides the frame analysis cadence. You do not need to configure a sample rate.
 
+To save a manual notation area in JSON, replace `null` with an object:
+
+```json
+{
+  "notation_roi": {"x": 0, "y": 0, "width": 1280, "height": 230}
+}
+```
+
 When `output_debug_files` is true, generated outputs are written under the output folder:
 
 ```text
 output/
+  localization/
+    roi_preview.jpg
   stable_views/
   extracted_regions/
   stitched_pages/

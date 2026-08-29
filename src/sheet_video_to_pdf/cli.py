@@ -8,7 +8,7 @@ from typing import Callable, Sequence
 
 from .config import build_config
 from .errors import SheetVideoToPdfError
-from .models import AppConfig, DuplicatePolicy, PageOrientation, PagePreset
+from .models import AppConfig, BoundingBox, DuplicatePolicy, PageOrientation, PagePreset
 from .pipeline import run_pipeline
 from .progress import run_with_elapsed_tracker
 
@@ -33,6 +33,7 @@ def parse_args(argv: Sequence[str] | None = None) -> ParsedCli:
     parser.add_argument("--page-margin-inches", type=float)
     parser.add_argument("--target-systems-per-page", type=_target_systems)
     parser.add_argument("--duplicate-policy", choices=[item.value for item in DuplicatePolicy])
+    parser.add_argument("--notation-roi", type=_notation_roi)
     parser.add_argument("--jpeg-quality", type=int)
     parser.add_argument("--pdf-dpi", type=int)
     parser.add_argument("--no-review-assets", action="store_true")
@@ -80,3 +81,20 @@ def _target_systems(value: str) -> int | str:
     if value == "auto":
         return value
     return int(value)
+
+
+def _notation_roi(value: str) -> BoundingBox:
+    try:
+        parts = [int(part.strip()) for part in value.split(",")]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "notation ROI must be x,y,width,height"
+        ) from exc
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError("notation ROI must be x,y,width,height")
+    x, y, width, height = parts
+    if x < 0 or y < 0 or width <= 0 or height <= 0:
+        raise argparse.ArgumentTypeError(
+            "notation ROI x and y must be non-negative and width and height must be positive"
+        )
+    return BoundingBox(x, y, width, height)
